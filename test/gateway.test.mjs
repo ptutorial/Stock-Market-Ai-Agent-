@@ -81,3 +81,59 @@ test('supports two independent Gemini accounts with deterministic provider order
   assert.equal(second.accountId, 'gemini-secondary');
   assert.deepEqual(adapter.calls.map((call) => call.account), ['gemini-primary', 'gemini-secondary']);
 });
+
+class StreamingAdapter extends FakeAdapter {
+  constructor(name, mode) { super(name); this.mode = mode; }
+  async *stream(account) {
+    if (this.mode === 'fail-before') throw new Error('503 before first chunk');
+    yield { text: `from-${account.id}`, usage: { totalTokens: 2 } };
+    if (this.mode === 'fail-after') throw new Error('503 after first chunk');
+    yield { text: '', done: true, usage: { totalTokens: 2 } };
+  }
+}
+
+test('streaming failure before first chunk falls back to another account', async () => {
+  const first = new StreamingAdapter('groq', 'fail-before');
+  const second = new StreamingAdapter('groq', 'success');
+  const credentials = new FakeCredentials({ A1: 'first', A2: 'second' });
+  const registry = new ModelRegistry({ ttlMs: 60_000 });
+  const stateStore = new InMemoryStateStore();
+  const gateway = new LLMGateway({ adapters: [first, second], accounts: [account('a1', 'A1', 10), account('a2', 'A2', 1)], maxRetries: 0, stateStore, modelRegistry: registry }, credentials);
+  // Two adapters cannot share the same provider name in the adapter map, so use a single adapter
+  // whose stream behavior changes after the first account is attempted.
+  const adapter = new StreamingAdapter('groq', 'fail-before');
+  let calls = 0;
+  adapter.stream = async function* (account) {
+    calls += 1;
+    if (calls === 1) throw new Error('503 before first chunk');
+    yield { text: `from-${account.id}`, usage: { totalTokens: 2 } };
+    yield { text: '', done: true, usage: { totalTokens: 2 } };
+  };
+  const fallbackGateway = new LLMGateway({ adapters: [adapter], accounts: [account('a1', 'A1', 10), account('a2', 'A2', 1)], maxRetries: 0, stateStore: new InMemoryStateStore(), modelRegistry: new ModelRegistry({ ttlMs: 60_000 }) }, credentials);
+  const chunks = [];
+  for await (const chunk of fallbackGateway.stream('general', 'hello')) chunks.push(chunk);
+  assert.equal(chunks[0].text, 'from-a2');
+  assert.equal(calls, 2);
+});
+
+test('streaming failure after first chunk does not fallback or duplicate data', async () => {
+  const adapter = new StreamingAdapter('groq', 'fail-after');
+  const gateway = new LLMGateway({ adapters: [adapter], accounts: [account('a1', 'A1', 10), account('a2', 'A2', 1)], maxRetries: 0 }, new FakeCredentials({ A1: 'first', A2: 'second' }));
+  const chunks = [];
+  await assert.rejects(async () => {
+    for await (const chunk of gateway.stream('general', 'hello')) chunks.push(chunk);
+  });
+  assert.deepEqual(chunks.map((chunk) => chunk.text), ['from-a1']);
+});
+
+test('successful streaming usage updates account state without double-counting reservation', async () => {
+  const adapter = new StreamingAdapter('groq', 'success');
+  const stateStore = new InMemoryStateStore();
+  const gateway = new LLMGateway({ adapters: [adapter], accounts: [account('a1', 'A1', 10, { rpm: 10, tpm: 100 })], stateStore, maxRetries: 0 }, new FakeCredentials({ A1: 'good' }));
+  const chunks = [];
+  for await (const chunk of gateway.stream('general', 'hello')) chunks.push(chunk);
+  const state = await stateStore.get('a1');
+  assert.equal(state?.requests, 1);
+  assert.equal(state?.tokens, 2);
+  assert.equal(chunks.at(-1)?.done, true);
+});
