@@ -69,6 +69,7 @@ export class LLMGateway {
           }
           const started = Date.now();
           const result = await candidate.adapter.generate(candidate.account, request, candidate.model, credential, requestId);
+          result.usage = this.withCost(result.usage, candidate.account, candidate.model);
           await this.markSuccess(candidate.account.id, result.usage.totalTokens ?? 0, Date.now() - started);
           await this.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: result.model, latencyMs: Date.now() - started, success: true, usage: result.usage });
           return result;
@@ -106,8 +107,9 @@ export class LLMGateway {
             finalUsage = chunk.usage?.totalTokens ?? finalUsage;
             yield chunk;
           }
-          await self.markSuccess(candidate.account.id, finalUsage, Date.now() - started);
-          await self.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: candidate.model.id, latencyMs: Date.now() - started, success: true, usage: { totalTokens: finalUsage } });
+          const usage = self.withCost({ totalTokens: finalUsage }, candidate.account, candidate.model);
+          await self.markSuccess(candidate.account.id, usage.totalTokens ?? 0, Date.now() - started);
+          await self.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: candidate.model.id, latencyMs: Date.now() - started, success: true, usage });
           return;
         } catch (error) {
           const normalized = normalizeError(error);
@@ -153,6 +155,16 @@ export class LLMGateway {
     const options = request.options ?? {};
     const input = request.messages?.reduce((sum, message) => sum + Math.ceil(message.content.length / 4), 0) ?? Math.ceil(request.prompt.length / 4);
     return input + Math.max(0, options.maxTokens ?? 0);
+  }
+
+  private withCost(usage: GenerateResult['usage'], account: AccountConfig, model: ModelInfo): GenerateResult['usage'] {
+    const inputRate = model.inputCostPerMillion ?? account.costPerMillionInput;
+    const outputRate = model.outputCostPerMillion ?? account.costPerMillionOutput;
+    if (inputRate === undefined && outputRate === undefined) return usage;
+    const inputTokens = usage.inputTokens ?? 0;
+    const outputTokens = usage.outputTokens ?? 0;
+    const estimatedCost = (inputTokens * (inputRate ?? 0) + outputTokens * (outputRate ?? 0)) / 1_000_000;
+    return { ...usage, estimatedCost, currency: usage.currency ?? 'USD' };
   }
 
   private async markSuccess(id: string, tokens: number, latencyMs?: number): Promise<void> {
