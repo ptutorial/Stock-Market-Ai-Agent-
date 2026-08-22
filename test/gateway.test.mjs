@@ -6,12 +6,14 @@ class FakeAdapter {
   name = 'groq';
   calls = [];
   async generate(account, request, model, credential, requestId) {
-    this.calls.push({ account: account.id, credential, model });
+    this.calls.push({ account: account.id, credential, model: model.id });
     if (credential === 'bad') throw new Error('503 provider unavailable');
-    return { text: 'ok', provider: this.name, accountId: account.id, model, usage: { totalTokens: 3 }, requestId, latencyMs: 1 };
+    return { text: 'ok', provider: this.name, accountId: account.id, model: model.id, usage: { totalTokens: 3 }, requestId, latencyMs: 1 };
   }
   async *stream() { yield { text: 'ok', done: true }; }
-  async discoverModels() { return ['test-model']; }
+  async discoverModels(account) {
+    return [{ id: 'test-model', provider: this.name, capabilities: account.capabilities, available: true }];
+  }
   async healthCheck() { return true; }
 }
 
