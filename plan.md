@@ -43,10 +43,9 @@ This document is the phased implementation roadmap for the multi-provider cloud 
 **Status:** Future
 
 # Phase 18 — Production Readiness Review
-**Status:** Hardening in progress
+**Status:** Verification in progress
 
 ## Phase 18 Hardening — Batch 1 of 3
-
 **Status: Complete**
 
 1. Production runtime wiring.
@@ -57,7 +56,6 @@ This document is the phased implementation roadmap for the multi-provider cloud 
 6. Multi-account verification.
 
 ## Phase 18 Hardening — Batch 2 of 3
-
 **Status: Complete**
 
 7. Correct round-robin routing.
@@ -68,30 +66,45 @@ This document is the phased implementation roadmap for the multi-provider cloud 
 12. Scheduled provider health checks and graceful shutdown.
 
 ## Phase 18 Hardening — Batch 3 of 3
+**Status: Implemented — verification in progress**
 
-**Status: Implemented — CI verification pending**
+13. Concurrency-safe Redis state updates.
+14. Normalized cost accounting.
+15. HTTP error hardening.
+16. Provider error normalization.
+17. Model capability correctness.
+18. Message-role normalization.
 
-13. **Concurrency-safe Redis state updates** — Redis account-state mutations now use a short-lived distributed lock with token-safe release instead of an unsafe GET/SET race.
-14. **Normalized cost accounting** — gateway results now calculate estimated cost from actual input/output usage using model-level pricing first and account-level pricing as fallback.
-15. **HTTP error hardening** — public HTTP responses expose stable gateway error categories while provider/internal messages remain hidden except for client-side invalid-request errors.
-16. **Provider error normalization** — provider HTTP handling maps authentication, rate-limit, model, server, and request failures into the common `GatewayError` taxonomy with `Retry-After` support.
-17. **Model capability correctness** — Gemini discovery no longer blindly assigns every account capability to every model. Configured model capabilities are treated as an explicit allow-list, and model metadata is used for generation-method validation.
-18. **Message-role normalization** — Gemini now maps system messages to `systemInstruction`, assistant messages to `model`, user messages to `user`, and rejects unsupported tool-result messages instead of silently misrepresenting them.
+## Production Certification — Verification Matrix
 
-## Remaining production certification work
+The implementation phase is complete. Production certification requires all of the following to pass:
 
-Phase 18 is **not production-certified** yet. The next work is verification rather than another feature phase:
+1. **TypeScript build** — `npm run build`.
+2. **Unit/integration tests** — `npm test`.
+3. **Dependency audit** — high-severity production vulnerabilities must be absent or explicitly reviewed.
+4. **Docker build** — production image must build successfully.
+5. **Compose validation** — `docker compose config` must succeed with CI-safe configuration.
+6. **Redis integration** — gateway must start against Redis and preserve quota state.
+7. **Two-account verification** — two configured Gemini accounts must be independently routable and quota-isolated.
+8. **Concurrent quota contention** — simultaneous requests must not over-reserve the same Redis quota window.
+9. **Streaming failure/recovery** — failure before first byte may fall back; failure after delivery begins must surface safely without duplicate output.
+10. **Health/readiness** — `/health` and `/ready` must behave correctly during startup and shutdown.
+11. **Security verification** — no credentials in source, logs, or generated artifacts.
+12. **Container security** — image vulnerability scan must be reviewed before production deployment.
+13. **Load/concurrency testing** — routing, Redis contention, and request handling must be tested under concurrent load.
+14. **Deployment smoke test** — container startup, Redis connectivity, health endpoints, authenticated generation, and graceful termination must be verified.
 
-- Run full TypeScript build and test suite.
-- Run Docker Compose integration test with Redis.
-- Run two-account Gemini integration test with real credentials supplied only through environment/secret configuration.
-- Run concurrent quota contention tests against Redis.
-- Run streaming failure/recovery tests.
-- Run Docker vulnerability scanning.
-- Run load/concurrency tests.
-- Run secret-history scanning.
-- Run deployment smoke test.
-- Confirm CI is green for the final hardening commits.
+### CI verification added
+
+The GitHub Actions pipeline now runs:
+
+- build
+- test
+- production dependency audit
+- Docker image build
+- Docker Compose configuration validation
+
+The CI workflow does not use real provider credentials. Live Gemini/Redis/load/deployment tests remain explicit certification checks and must use protected test infrastructure/secrets.
 
 ## Important status rule
 
@@ -127,12 +140,12 @@ Phase 9  Usage / cost                       [DONE]
 Phase 10 Health monitoring                  [DONE]
 Phase 11 Observability                     [DONE]
 Phase 12 Security hardening                [DONE]
-Phase 13 Comprehensive testing             [DONE]
-Phase 14 Developer API / SDK               [DONE]
-Phase 15 Service/API layer                 [DONE]
-Phase 16 Redis / production scaling        [DONE]
-Phase 17 Additional providers              [FUTURE]
-Phase 18 Production readiness              [HARDENING / VERIFICATION]
+Phase 13 Comprehensive testing              [DONE]
+Phase 14 Developer API / SDK                [DONE]
+Phase 15 Service/API layer                  [DONE]
+Phase 16 Redis / production scaling         [DONE]
+Phase 17 Additional providers               [FUTURE]
+Phase 18 Production readiness               [VERIFICATION]
 ```
 
 # Definition of Done for Every Phase
