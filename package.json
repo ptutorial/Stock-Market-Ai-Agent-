@@ -6,7 +6,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test test/*.test.mjs",
-    "load:test": "npm run build && node scripts/load-test.mjs"
+    "load:test": "npm run build && node scripts/load-test.mjs",
+    "load:redis": "npm run build && node scripts/load-redis-test.mjs",
+    "load:multi": "npm run build && node scripts/load-multi-instance.mjs",
+    "load:sustained": "npm run build && node scripts/load-sustained.mjs",
+    "load:fairness": "npm run build && node scripts/load-fairness.mjs",
+    "load:failure": "npm run build && node scripts/load-failure-recovery.mjs",
+    "certification:batch-e": "node scripts/production-certification.mjs"
   },
   "engines": {
     "node": ">=20"
