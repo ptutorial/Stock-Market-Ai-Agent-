@@ -1,0 +1,162 @@
+openapi: 3.0.3
+info:
+  title: Multi-Provider LLM Gateway API
+  version: 0.1.0
+  description: |
+    HTTP API for routing LLM generation requests across configured provider
+    accounts with authentication, health/readiness checks, retry, fallback,
+    quotas, and request correlation.
+servers:
+  - url: http://localhost:3000
+    description: Local server
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      summary: Liveness check
+      security: []
+      responses:
+        '200':
+          description: Gateway process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /ready:
+    get:
+      summary: Readiness check
+      security: []
+      responses:
+        '200':
+          description: At least one configured account is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: No healthy account is currently available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+  /v1/generate:
+    post:
+      summary: Generate an LLM response
+      description: Routes the request through the configured gateway strategy, including account selection, retries, fallback, quota enforcement, and provider normalization.
+      operationId: generate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateRequest'
+      responses:
+        '200':
+          description: Successful generation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token, or provider authentication failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: Request body exceeds configured limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Provider or gateway rate limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Provider/gateway failure after routing and retry handling
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API key
+  schemas:
+    GenerateRequest:
+      type: object
+      required: [task, prompt]
+      properties:
+        task:
+          type: string
+          description: Gateway task type configured by the application domain.
+          example: general
+        prompt:
+          type: string
+          minLength: 1
+          example: Summarize today's market outlook.
+        options:
+          type: object
+          additionalProperties: true
+          description: Optional generation/routing options supported by the SDK.
+    GenerateResponse:
+      type: object
+      additionalProperties: true
+      description: Normalized gateway generation response. Provider-specific fields may be present according to the selected adapter.
+      properties:
+        text:
+          type: string
+        provider:
+          type: string
+        accountId:
+          type: string
+        model:
+          type: string
+        requestId:
+          type: string
+    HealthResponse:
+      type: object
+      required: [status, requestId]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        requestId:
+          type: string
+    ReadyResponse:
+      type: object
+      required: [status, accounts, healthyAccounts, requestId]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        accounts:
+          type: integer
+          minimum: 0
+        healthyAccounts:
+          type: integer
+          minimum: 0
+        requestId:
+          type: string
+    ErrorResponse:
+      type: object
+      required: [error, requestId]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        requestId:
+          type: string
