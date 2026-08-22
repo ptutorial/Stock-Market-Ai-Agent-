@@ -6,6 +6,7 @@ export * from './router.js';
 export * from './limits.js';
 export * from './retry.js';
 export * from './state.js';
+export * from './redis.js';
 export * from './usage.js';
 export * from './health.js';
 export * from './observability.js';
