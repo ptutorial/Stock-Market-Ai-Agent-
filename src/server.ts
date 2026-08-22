@@ -42,6 +42,8 @@ const maxBodyBytes = Number(process.env.GATEWAY_REQUEST_BODY_LIMIT_BYTES ?? 1_04
 if (!Number.isInteger(maxBodyBytes) || maxBodyBytes < 1) throw new Error('Invalid GATEWAY_REQUEST_BODY_LIMIT_BYTES');
 const healthIntervalMs = Number(process.env.GATEWAY_HEALTH_CHECK_INTERVAL_MS ?? 30_000);
 if (!Number.isInteger(healthIntervalMs) || healthIntervalMs < 5_000) throw new Error('Invalid GATEWAY_HEALTH_CHECK_INTERVAL_MS');
+const shutdownTimeoutMs = Number(process.env.GATEWAY_SHUTDOWN_TIMEOUT_MS ?? 10_000);
+if (!Number.isInteger(shutdownTimeoutMs) || shutdownTimeoutMs < 1_000 || shutdownTimeoutMs > 120_000) throw new Error('Invalid GATEWAY_SHUTDOWN_TIMEOUT_MS');
 
 const gatewayOptions: GatewayHttpServerOptions = { accounts, adapters, strategy: config.strategy, maxRetries: config.maxRetries, cooldownMs: config.cooldownMs, stateStore, apiKey, maxBodyBytes };
 const handler = createGatewayHttpHandler(gatewayOptions);
@@ -62,14 +64,7 @@ const checkHealth = async () => {
     const checked = await healthMonitor.check(account.id, account, adapter, credential, current);
     await stateStore.update(account.id, (latest) => {
       const state = latest ?? current;
-      return {
-        ...state,
-        health: checked.health,
-        cooldownUntil: checked.cooldownUntil,
-        lastSuccessAt: checked.lastSuccessAt ?? state.lastSuccessAt,
-        lastFailureAt: checked.lastFailureAt ?? state.lastFailureAt,
-        failures: checked.health === 'healthy' ? 0 : Math.max(state.failures, checked.failures),
-      };
+      return { ...state, health: checked.health, cooldownUntil: checked.cooldownUntil, lastSuccessAt: checked.lastSuccessAt ?? state.lastSuccessAt, lastFailureAt: checked.lastFailureAt ?? state.lastFailureAt, failures: checked.health === 'healthy' ? 0 : Math.max(state.failures, checked.failures) };
     });
   }));
 };
@@ -110,13 +105,44 @@ const server = createServer(async (req, res) => {
   }
 });
 
+const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number, onTimeout: () => void): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => { onTimeout(); reject(new Error('Shutdown timeout')); }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
 const shutdown = async (signal: string) => {
   if (shuttingDown) return;
   shuttingDown = true;
   if (healthTimer) clearInterval(healthTimer);
   console.log(`Received ${signal}; shutting down`);
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  if (redisClient?.isOpen) await redisClient.quit();
+
+  try {
+    await withTimeout(new Promise<void>((resolve) => server.close(() => resolve())), shutdownTimeoutMs, () => {
+      server.closeAllConnections();
+    });
+  } catch (error: unknown) {
+    console.error('HTTP server shutdown timed out', error);
+  }
+
+  if (redisClient?.isOpen) {
+    try {
+      await withTimeout(redisClient.quit(), shutdownTimeoutMs, () => {
+        redisClient?.disconnect();
+      });
+    } catch (error: unknown) {
+      console.error('Redis shutdown timed out', error);
+      redisClient.disconnect();
+    }
+  }
 };
 process.once('SIGTERM', () => void shutdown('SIGTERM').then(() => process.exit(0)));
 process.once('SIGINT', () => void shutdown('SIGINT').then(() => process.exit(0)));
