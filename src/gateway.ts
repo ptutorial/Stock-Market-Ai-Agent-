@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { GatewayError, normalizeError } from './errors.js';
-import type { AccountConfig, AccountState, GenerateRequest, GenerateResult, ProviderAdapter, RoutingStrategy, StreamChunk } from './types.js';
+import type { AccountConfig, AccountState, GenerateRequest, GenerateResult, ProviderAdapter, RoutingStrategy, StreamChunk, TaskType } from './types.js';
 
 export interface CredentialStore { get(credentialRef: string): Promise<string>; }
 export interface UsageSink { record(event: Record<string, unknown>): Promise<void> | void; }
@@ -44,9 +44,7 @@ export class LLMGateway {
   }
 
   async generate(task: string, prompt: string, options: GenerateRequest['options'] = {}): Promise<GenerateResult> {
-    const request: GenerateRequest = { prompt, options: { ...options, task: options.task ?? (task as GenerateRequest['options'] extends infer _ ? never : never) } };
-    // The cast above is intentionally avoided by callers in typed code; task remains a routing hint.
-    request.options = { ...options, task: task as NonNullable<GenerateRequest['options']>['task'] };
+    const request: GenerateRequest = { prompt, options: { ...options, task: task as TaskType } };
     const candidates = this.selectCandidates(request);
     if (!candidates.length) throw new GatewayError('ProviderUnavailableError', 'No eligible provider/account/model is available');
     const requestId = randomUUID();
@@ -76,7 +74,7 @@ export class LLMGateway {
   stream(task: string, prompt: string, options: GenerateRequest['options'] = {}): AsyncIterable<StreamChunk> {
     const self = this;
     return (async function* () {
-      const request: GenerateRequest = { prompt, options: { ...options, task: task as NonNullable<GenerateRequest['options']>['task'] } };
+      const request: GenerateRequest = { prompt, options: { ...options, task: task as TaskType } };
       const candidate = self.selectCandidates(request)[0];
       if (!candidate) throw new GatewayError('ProviderUnavailableError', 'No eligible provider/account/model is available');
       const credential = await self.credentialStore.get(candidate.account.credentialRef);
@@ -98,8 +96,7 @@ export class LLMGateway {
         if (![...required].every(cap => account.capabilities.includes(cap))) continue;
         const model = request.options?.model ?? account.models[0];
         if (!model || !account.models.includes(model)) continue;
-        const score = this.score(account, state);
-        result.push({ account, adapter, model, score });
+        result.push({ account, adapter, model, score: this.score(account, state) });
       }
     }
     return result.sort((a, b) => b.score - a.score);
@@ -109,13 +106,15 @@ export class LLMGateway {
     switch (this.cfg.strategy ?? 'priority') {
       case 'lowest_utilization': return -(state.requests + state.tokens / 1000);
       case 'least_recently_used': return -(state.lastUsedAt ?? 0);
-      case 'fastest': return (account.priority ?? 0);
+      case 'fastest': return account.priority ?? 0;
       case 'cheapest': return -((account.costPerMillionInput ?? 0) + (account.costPerMillionOutput ?? 0));
       case 'round_robin': {
         const key = account.provider;
+        const accounts = this.cfg.accounts.filter(a => a.provider === key);
         const cursor = this.roundRobinCursor.get(key) ?? 0;
+        const index = accounts.findIndex(a => a.id === account.id);
         this.roundRobinCursor.set(key, cursor + 1);
-        return -Math.abs(cursor % Math.max(1, this.cfg.accounts.filter(a => a.provider === key).length));
+        return -((index - cursor + accounts.length) % accounts.length);
       }
       default: return account.priority ?? 0;
     }
@@ -134,7 +133,7 @@ export class LLMGateway {
   }
 
   private async backoff(attempt: number, retryAfterMs?: number): Promise<void> {
-    const delay = retryAfterMs ?? Math.min(10_000, 250 * (2 ** attempt)) + Math.floor(Math.random() * 100);
+    const delay = retryAfterMs ?? (Math.min(10_000, 250 * (2 ** attempt)) + Math.floor(Math.random() * 100));
     await new Promise(resolve => setTimeout(resolve, delay));
   }
 }
