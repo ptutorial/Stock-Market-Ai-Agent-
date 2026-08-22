@@ -61,46 +61,73 @@ Provide a clean, typed developer-facing API over the gateway without exposing in
 - Exported SDK APIs from `src/index.ts`.
 - Added SDK unit/integration tests for validation, generation and streaming.
 
-### Developer API
+# Phase 15 — Service/API Layer
+**Status:** Implemented — CI verification pending
 
-```ts
-const client = gatewayClient()
-  .addAccount(account)
-  .addAdapter(adapter)
-  .credentialStore(credentials)
-  .strategy('priority')
-  .maxRetries(2)
-  .build();
+### Goals
 
-const result = await client.generate({
-  task: 'general',
-  prompt: 'Hello',
-});
+Expose the typed SDK through a provider-neutral HTTP boundary while keeping authentication, request limits, request correlation and gateway execution outside provider-specific adapters.
 
-for await (const chunk of client.stream({
-  task: 'general',
-  prompt: 'Stream this',
-})) {
-  process.stdout.write(chunk.text);
+### Completed
+
+- Added `src/http.ts`.
+- Added `createGatewayHttpHandler()`.
+- Added `GatewayHttpRequest` and `GatewayHttpResponse` contracts.
+- Added `POST /v1/generate` endpoint.
+- Added method validation.
+- Added request payload validation.
+- Added configurable request body size limit (1 MiB default).
+- Added optional Bearer API-key authentication.
+- Added request correlation through `x-request-id`.
+- Generates a request ID when the client does not provide one.
+- Added `404`, `405`, `400`, `401`, `413` and gateway-error responses.
+- Added `collectStream()` helper for adapters/framework integrations that need to materialize an async stream.
+- Exported HTTP APIs from `src/index.ts`.
+- Added HTTP boundary tests.
+
+### API
+
+```text
+POST /v1/generate
+Authorization: Bearer <configured-api-key>   # optional
+X-Request-Id: <client-id>                    # optional
+Content-Type: application/json
+
+{
+  "task": "general",
+  "prompt": "Hello",
+  "options": {}
 }
 ```
 
-### Design boundary
+The handler returns the gateway result plus the request ID and does not expose provider credentials.
 
-The SDK delegates execution to `LLMGateway`; it does not duplicate routing, retry, credential retrieval, health or provider logic. This keeps the public developer API stable while allowing the internal gateway implementation to evolve.
+### Security boundary
+
+```text
+HTTP request
+    ↓
+method / auth / size validation
+    ↓
+request ID
+    ↓
+GatewayClient
+    ↓
+LLMGateway
+    ↓
+routing / retry / health / provider adapter
+```
 
 ### Exit criteria
 
-- Typed high-level generate API. **Complete.**
-- Typed streaming API. **Complete.**
-- Fluent builder API. **Complete.**
-- Configuration validation. **Complete.**
-- Existing gateway behavior reused rather than duplicated. **Complete.**
-- SDK tests added. **Complete.**
+- Typed HTTP request/response boundary. **Complete.**
+- Generate endpoint. **Complete.**
+- Request authentication boundary. **Complete.**
+- Payload-size protection. **Complete.**
+- Request correlation. **Complete.**
+- HTTP boundary tests. **Complete.**
 - CI build/test verification. **Pending.**
 
-# Phase 15 — Service/API Layer
-**Status:** Optional / Later
 # Phase 16 — Redis & Production Scaling
 **Status:** Optional / Later
 # Phase 17 — Additional Providers
@@ -140,7 +167,7 @@ Phase 11 Observability                     [IMPLEMENTED]
 Phase 12 Security hardening                [IMPLEMENTED]
 Phase 13 Comprehensive testing             [IMPLEMENTED]
 Phase 14 Developer API / SDK               [IMPLEMENTED]
-Phase 15 Optional service API
+Phase 15 Service/API layer                 [IMPLEMENTED]
 Phase 16 Optional Redis scaling
 Phase 17 Additional providers
 Phase 18 Production readiness
