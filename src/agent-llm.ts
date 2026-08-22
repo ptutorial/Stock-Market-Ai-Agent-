@@ -91,13 +91,16 @@ export class LLMGatewayAgentAdapter implements MultiProviderGateway {
   constructor(private readonly gateway: LLMGateway) {}
 
   async generate(request: Parameters<MultiProviderGateway['generate']>[0]): Promise<AgentLLMResponse> {
-    const result = await this.gateway.generate(request.task, request.systemPrompt, {
+    // The gateway API accepts one prompt. AgentRuntime has already composed the
+    // system instructions, stock context and tool evidence into `input`.
+    // Passing that composed input preserves the complete agent context.
+    const prompt = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
+    const result = await this.gateway.generate(request.task, prompt, {
       task: request.task,
       model: request.model,
       capabilities: request.capabilities,
       tools: request.tools,
       maxTokens: request.maxOutputTokens,
-      // These fields are consumed by the gateway as internal routing metadata.
       ...(request.provider ? { provider: request.provider } : {}),
       ...(request.requestId ? { requestId: request.requestId } : {}),
     } as Parameters<LLMGateway['generate']>[2] & { provider?: LLMProvider; requestId?: string });
