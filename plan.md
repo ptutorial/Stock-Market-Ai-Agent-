@@ -49,55 +49,89 @@ LLM Gateway
 **Status:** Implemented — CI verification pending
 
 # Phase 8 — Concurrency & Distributed State
+**Status:** Implemented — CI verification pending
+
+### Note
+
+The Redis state boundary exists, but cross-process atomic quota reservation remains a production integration requirement.
+
+# Phase 9 — Usage, Cost & Accounting
 
 **Status:** Implemented — CI verification pending
 
 ### Goals
 
-Make account state and quota reservations safe when multiple asynchronous operations share the same process, while providing a persistence boundary for multi-worker deployments.
+Normalize provider usage into a consistent request-level accounting model, estimate cost from model/account pricing, and provide aggregated usage reporting without coupling the application to a specific database.
 
 ### Completed
 
-- Added `src/state.ts`.
-- Added provider-neutral `StateStore` interface.
-- Added `InMemoryStateStore`.
-- Added serialized per-account updates.
-- Added atomic-in-process quota reservation semantics.
-- Added RPM/RPD/TPM/TPD checks at reservation time.
-- Added reservation accounting to `AccountState`.
-- Added minute/day window rollover.
-- Added `RedisStateStore` persistence boundary for distributed deployments.
-- Exported state APIs from `src/index.ts`.
-- Added concurrent reservation tests proving only one reservation wins against a one-request limit.
-- Added state persistence/update tests.
+- Added `src/usage.ts`.
+- Added provider-neutral `UsageRecord`.
+- Added `UsageTotals` aggregation contract.
+- Added `UsageStore` interface.
+- Added usage normalization with derived `totalTokens`.
+- Added model-level input/output price calculation.
+- Added account-level pricing fallback when model pricing is unavailable.
+- Added USD as the default accounting currency when no currency is supplied.
+- Added `enrichUsage` for attaching estimated cost to provider usage.
+- Added request-level usage record creation.
+- Added `InMemoryUsageStore`.
+- Added aggregation by account, provider, model and time range.
+- Exported usage APIs from `src/index.ts`.
+- Added tests for token normalization, cost calculation, account pricing fallback and filtered aggregation.
 
-### Concurrency flow
+### Accounting flow
 
 ```text
-Worker A ─┐
-Worker B ─┼──> StateStore ──> per-account serialization ──> quota reservation
-Worker C ─┘                                      |
-                                                v
-                                         AccountState
+Provider Result
+      |
+      v
+Normalize Usage
+      |
+      +--> input tokens
+      +--> output tokens
+      +--> total tokens
+      |
+      v
+Pricing Resolver
+      |
+      +--> model pricing
+      +--> account pricing fallback
+      |
+      v
+UsageRecord
+      |
+      v
+UsageStore
+      |
+      +--> per-request history
+      +--> account totals
+      +--> provider totals
+      +--> model totals
+      +--> time-range totals
 ```
 
-### Distributed-state boundary
+### Cost formula
 
-`RedisStateStore` provides the persistence abstraction required for multi-worker deployment. Production deployment must use Redis-side atomic/Lua reservation logic (or an equivalent transactional primitive) before claiming cross-process quota reservations as atomic. The current implementation intentionally keeps the production Redis primitive behind the `RedisLikeClient` boundary rather than coupling the core domain to a Redis package.
+```text
+estimatedCost =
+  (inputTokens  × inputCostPerMillion  / 1,000,000)
++ (outputTokens × outputCostPerMillion / 1,000,000)
+```
 
 ### Exit criteria
 
-- Concurrent in-process reservations are serialized. **Complete.**
-- Quota checks happen before reservation is accepted. **Complete.**
-- Account state can be persisted through a provider-neutral interface. **Complete.**
-- A Redis-backed state boundary exists. **Complete.**
-- Cross-process atomic quota guarantees are explicitly isolated as a production integration requirement. **Pending.**
+- Provider usage can be normalized. **Complete.**
+- Total tokens can be derived when providers omit them. **Complete.**
+- Model pricing can produce estimated request cost. **Complete.**
+- Account pricing can act as a fallback. **Complete.**
+- Usage can be persisted behind a provider-neutral store interface. **Complete.**
+- Usage can be aggregated by account/provider/model/time range. **Complete.**
 - CI build and test verification. **Pending.**
 
----
+### Phase note
 
-# Phase 9 — Usage, Cost & Accounting
-**Status:** Planned
+Persistent database storage, budget enforcement and production-grade financial reconciliation are intentionally deferred. The accounting contract created here is the foundation for those later capabilities.
 
 # Phase 10 — Health Monitoring
 **Status:** Planned
@@ -152,7 +186,7 @@ Phase 5  Routing engine                     [IMPLEMENTED]
 Phase 6  Rate limits / quotas               [IMPLEMENTED]
 Phase 7  Retry / fallback                   [IMPLEMENTED]
 Phase 8  Concurrency / distributed state    [IMPLEMENTED]
-Phase 9  Usage / cost
+Phase 9  Usage / cost                       [IMPLEMENTED]
 Phase 10 Health monitoring
 Phase 11 Observability
 Phase 12 Security hardening
