@@ -8,27 +8,9 @@ import { ModelRouter } from './router.js';
 
 export interface CredentialStore { get(credentialRef: string): Promise<string>; }
 export interface UsageSink { record(event: Record<string, unknown>): Promise<void> | void; }
-export class EnvironmentCredentialStore implements CredentialStore {
-  async get(credentialRef: string): Promise<string> {
-    const value = process.env[credentialRef];
-    if (!value) throw new GatewayError('AuthenticationError', `Credential ${credentialRef} is not configured`);
-    return value;
-  }
-}
-export class InMemoryUsageSink implements UsageSink {
-  readonly events: Record<string, unknown>[] = [];
-  record(event: Record<string, unknown>): void { this.events.push(event); }
-}
-export interface GatewayConfig {
-  accounts: AccountConfig[];
-  adapters: ProviderAdapter[];
-  strategy?: RoutingStrategy;
-  fallbackProviders?: string[];
-  maxRetries?: number;
-  cooldownMs?: number;
-  stateStore?: StateStore;
-  modelRegistry?: ModelRegistry;
-}
+export class EnvironmentCredentialStore implements CredentialStore { async get(credentialRef: string): Promise<string> { const value = process.env[credentialRef]; if (!value) throw new GatewayError('AuthenticationError', `Credential ${credentialRef} is not configured`); return value; } }
+export class InMemoryUsageSink implements UsageSink { readonly events: Record<string, unknown>[] = []; record(event: Record<string, unknown>): void { this.events.push(event); } }
+export interface GatewayConfig { accounts: AccountConfig[]; adapters: ProviderAdapter[]; strategy?: RoutingStrategy; fallbackProviders?: string[]; maxRetries?: number; cooldownMs?: number; stateStore?: StateStore; modelRegistry?: ModelRegistry; }
 interface Candidate { account: AccountConfig; state: AccountState; adapter: ProviderAdapter; model: ModelInfo; score: number; }
 
 export class LLMGateway {
@@ -39,45 +21,30 @@ export class LLMGateway {
   private readonly usage: UsageSink;
   private readonly router: ModelRouter;
   private readonly config: Required<Pick<GatewayConfig, 'maxRetries' | 'cooldownMs'>>;
-
-  constructor(private readonly cfg: GatewayConfig, credentialStore: CredentialStore = new EnvironmentCredentialStore(), usage: UsageSink = new InMemoryUsageSink()) {
-    this.credentialStore = credentialStore;
-    this.usage = usage;
-    this.stateStore = cfg.stateStore ?? new InMemoryStateStore();
-    this.modelRegistry = cfg.modelRegistry ?? new ModelRegistry();
-    this.router = new ModelRouter({ strategy: cfg.strategy ?? 'priority' });
-    this.config = { maxRetries: cfg.maxRetries ?? 2, cooldownMs: cfg.cooldownMs ?? 30_000 };
-    for (const adapter of cfg.adapters) this.adapters.set(adapter.name, adapter);
-    for (const account of cfg.accounts) void this.stateStore.set(account.id, { requests: 0, tokens: 0, failures: 0, health: account.enabled === false ? 'disabled' : 'healthy' });
-  }
+  constructor(private readonly cfg: GatewayConfig, credentialStore: CredentialStore = new EnvironmentCredentialStore(), usage: UsageSink = new InMemoryUsageSink()) { this.credentialStore = credentialStore; this.usage = usage; this.stateStore = cfg.stateStore ?? new InMemoryStateStore(); this.modelRegistry = cfg.modelRegistry ?? new ModelRegistry(); this.router = new ModelRouter({ strategy: cfg.strategy ?? 'priority' }); this.config = { maxRetries: cfg.maxRetries ?? 2, cooldownMs: cfg.cooldownMs ?? 30_000 }; for (const adapter of cfg.adapters) this.adapters.set(adapter.name, adapter); for (const account of cfg.accounts) void this.stateStore.set(account.id, { requests: 0, tokens: 0, failures: 0, health: account.enabled === false ? 'disabled' : 'healthy' }); }
 
   async generate(task: TaskType, prompt: string, options: GenerateRequest['options'] = {}): Promise<GenerateResult> {
     const request: GenerateRequest = { prompt, options: { ...options, task: options.task ?? task } };
     const candidates = await this.selectCandidates(request);
     if (!candidates.length) throw new GatewayError('ProviderUnavailableError', 'No eligible provider/account/model is available');
     const requestId = randomUUID();
+    const reservationTokens = this.estimatedTokens(request);
     let lastError: GatewayError | undefined;
     for (const candidate of candidates) {
       for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
         try {
           const credential = await this.credentialStore.get(candidate.account.credentialRef);
-          const reserved = await this.stateStore.reserve(candidate.account.id, this.estimatedTokens(request), candidate.account.limits ?? {});
-          if (!reserved) {
-            lastError = new GatewayError('RateLimitError', `Account ${candidate.account.id} quota is exhausted`, true);
-            await this.markFailure(candidate.account.id, lastError);
-            break;
-          }
+          const reserved = await this.stateStore.reserve(candidate.account.id, reservationTokens, candidate.account.limits ?? {});
+          if (!reserved) { lastError = new GatewayError('RateLimitError', `Account ${candidate.account.id} quota is exhausted`, true); await this.markFailure(candidate.account.id, lastError); break; }
           const started = Date.now();
           const result = await candidate.adapter.generate(candidate.account, request, candidate.model, credential, requestId);
           result.usage = this.withCost(result.usage, candidate.account, candidate.model);
           await this.markSuccess(candidate.account.id, result.usage.totalTokens ?? 0, Date.now() - started);
-          await this.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: result.model, latencyMs: Date.now() - started, success: true, usage: result.usage });
+          await this.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: result.model, latencyMs: Date.now() - started, success: true, usage: result.usage, attempt, reservedTokens: reservationTokens, quotaReservation: 'per_provider_attempt' });
           return result;
         } catch (error) {
-          const normalized = normalizeError(error);
-          lastError = normalized;
-          await this.markFailure(candidate.account.id, normalized);
-          await this.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: candidate.model.id, success: false, errorCategory: normalized.category, retry: attempt < this.config.maxRetries && normalized.retryable });
+          const normalized = normalizeError(error); lastError = normalized; await this.markFailure(candidate.account.id, normalized);
+          await this.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: candidate.model.id, success: false, errorCategory: normalized.category, retry: attempt < this.config.maxRetries && normalized.retryable, attempt, reservedTokens: reservationTokens, quotaReservation: 'per_provider_attempt' });
           if (!normalized.retryable || attempt === this.config.maxRetries) break;
           await this.backoff(attempt, normalized.retryAfterMs);
         }
@@ -92,121 +59,43 @@ export class LLMGateway {
       const request: GenerateRequest = { prompt, options: { ...options, task: options.task ?? task } };
       const candidates = await self.selectCandidates(request);
       if (!candidates.length) throw new GatewayError('ProviderUnavailableError', 'No eligible provider/account/model is available');
-      const requestId = randomUUID();
-      let startedDelivery = false;
-      let lastError: GatewayError | undefined;
+      const requestId = randomUUID(); const reservationTokens = self.estimatedTokens(request); let startedDelivery = false; let lastError: GatewayError | undefined;
       for (const candidate of candidates) {
         try {
           const credential = await self.credentialStore.get(candidate.account.credentialRef);
-          const reserved = await self.stateStore.reserve(candidate.account.id, self.estimatedTokens(request), candidate.account.limits ?? {});
+          const reserved = await self.stateStore.reserve(candidate.account.id, reservationTokens, candidate.account.limits ?? {});
           if (!reserved) { lastError = new GatewayError('RateLimitError', `Account ${candidate.account.id} quota is exhausted`, true); await self.markFailure(candidate.account.id, lastError); continue; }
-          const started = Date.now();
-          let finalUsage = 0;
-          for await (const chunk of candidate.adapter.stream(candidate.account, request, candidate.model, credential, requestId)) {
-            startedDelivery = true;
-            finalUsage = chunk.usage?.totalTokens ?? finalUsage;
-            yield chunk;
-          }
-          const usage = self.withCost({ totalTokens: finalUsage }, candidate.account, candidate.model);
-          await self.markSuccess(candidate.account.id, usage.totalTokens ?? 0, Date.now() - started);
-          await self.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: candidate.model.id, latencyMs: Date.now() - started, success: true, usage });
-          return;
-        } catch (error) {
-          const normalized = normalizeError(error);
-          lastError = normalized;
-          await self.markFailure(candidate.account.id, normalized);
-          await self.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: candidate.model.id, success: false, errorCategory: normalized.category, streaming: true });
-          if (startedDelivery) throw error;
-        }
+          const started = Date.now(); let finalUsage = 0;
+          for await (const chunk of candidate.adapter.stream(candidate.account, request, candidate.model, credential, requestId)) { startedDelivery = true; finalUsage = chunk.usage?.totalTokens ?? finalUsage; yield chunk; }
+          const usage = self.withCost({ totalTokens: finalUsage }, candidate.account, candidate.model); await self.markSuccess(candidate.account.id, usage.totalTokens ?? 0, Date.now() - started); await self.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: candidate.model.id, latencyMs: Date.now() - started, success: true, usage, reservedTokens: reservationTokens, quotaReservation: 'per_provider_attempt' }); return;
+        } catch (error) { const normalized = normalizeError(error); lastError = normalized; await self.markFailure(candidate.account.id, normalized); await self.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: candidate.model.id, success: false, errorCategory: normalized.category, streaming: true, reservedTokens: reservationTokens, quotaReservation: 'per_provider_attempt' }); if (startedDelivery) throw error; }
       }
       throw lastError ?? new GatewayError('ProviderUnavailableError', 'All eligible streaming providers failed');
     })();
   }
 
   private async selectCandidates(request: GenerateRequest): Promise<Candidate[]> {
-    const options = request.options ?? {};
-    const required: Capability[] = options.capabilities ?? ['chat'];
-    const providerOrder = this.cfg.fallbackProviders ?? [...this.adapters.keys()];
-    const result: Candidate[] = [];
+    const options = request.options ?? {}; const required: Capability[] = options.capabilities ?? ['chat']; const providerOrder = this.cfg.fallbackProviders ?? [...this.adapters.keys()]; const result: Candidate[] = [];
     for (const provider of providerOrder) {
-      const adapter = this.adapters.get(provider);
-      if (!adapter) continue;
+      const adapter = this.adapters.get(provider); if (!adapter) continue;
       for (const account of this.cfg.accounts.filter((item) => item.provider === provider && item.enabled !== false)) {
         const state = await this.stateStore.get(account.id) ?? { requests: 0, tokens: 0, failures: 0, health: 'healthy' as const };
         if (state.health === 'disabled' || state.health === 'authentication_failure' || (state.cooldownUntil ?? 0) > Date.now()) continue;
         if (!required.every((capability) => account.capabilities.includes(capability))) continue;
-        const models = options.model ? account.models.filter((model) => model === options.model) : account.models;
-        if (!models.length) continue;
-        let credential: string;
-        try { credential = await this.credentialStore.get(account.credentialRef); } catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
-        let discovered: ModelInfo[];
-        try { discovered = await this.modelRegistry.discover(account, adapter, credential); } catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
+        const models = options.model ? account.models.filter((model) => model === options.model) : account.models; if (!models.length) continue;
+        let credential: string; try { credential = await this.credentialStore.get(account.credentialRef); } catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
+        let discovered: ModelInfo[]; try { discovered = await this.modelRegistry.discover(account, adapter, credential); } catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
         const quota = this.stateStore.getQuotaUsage ? await this.stateStore.getQuotaUsage(account.id) : undefined;
-        const routingState: AccountState = {
-          ...state,
-          metadata: {
-            ...state.metadata,
-            ...(quota && account.limits?.rpm ? { minuteRequestUtilization: quota.minuteRequests / account.limits.rpm } : {}),
-            ...(quota && account.limits?.tpm ? { minuteTokenUtilization: quota.minuteTokens / account.limits.tpm } : {}),
-          },
-        };
-        for (const model of discovered) {
-          if (!models.includes(model.id) || model.available === false) continue;
-          if (!required.every((capability) => model.capabilities.includes(capability))) continue;
-          result.push({ account, state: routingState, adapter, model, score: 0 });
-        }
+        const routingState: AccountState = { ...state, metadata: { ...state.metadata, ...(quota && account.limits?.rpm ? { minuteRequestUtilization: quota.minuteRequests / account.limits.rpm } : {}), ...(quota && account.limits?.tpm ? { minuteTokenUtilization: quota.minuteTokens / account.limits.tpm } : {}) } };
+        for (const model of discovered) { if (!models.includes(model.id) || model.available === false) continue; if (!required.every((capability) => model.capabilities.includes(capability))) continue; result.push({ account, state: routingState, adapter, model, score: 0 }); }
       }
     }
     return this.router.rank(result, { task: options.task, capabilities: required, model: options.model });
   }
 
-  private estimatedTokens(request: GenerateRequest): number {
-    const options = request.options ?? {};
-    const input = request.messages?.reduce((sum, message) => sum + Math.ceil(message.content.length / 4), 0) ?? Math.ceil(request.prompt.length / 4);
-    return input + Math.max(0, options.maxTokens ?? 0);
-  }
-
-  private withCost(usage: GenerateResult['usage'], account: AccountConfig, model: ModelInfo): GenerateResult['usage'] {
-    const inputRate = model.inputCostPerMillion ?? account.costPerMillionInput;
-    const outputRate = model.outputCostPerMillion ?? account.costPerMillionOutput;
-    if (inputRate === undefined && outputRate === undefined) return usage;
-    const inputTokens = usage.inputTokens ?? 0;
-    const outputTokens = usage.outputTokens ?? 0;
-    const estimatedCost = (inputTokens * (inputRate ?? 0) + outputTokens * (outputRate ?? 0)) / 1_000_000;
-    return { ...usage, estimatedCost, currency: usage.currency ?? 'USD' };
-  }
-
-  private async markSuccess(id: string, tokens: number, latencyMs?: number): Promise<void> {
-    await this.stateStore.update(id, (current) => {
-      const state = current ?? { requests: 0, tokens: 0, failures: 0, health: 'healthy' as const };
-      const now = Date.now();
-      const previousLatency = Number(state.metadata?.latencyMs);
-      const smoothedLatency = Number.isFinite(previousLatency) && previousLatency > 0 && latencyMs !== undefined ? previousLatency * 0.7 + latencyMs * 0.3 : latencyMs;
-      return {
-        ...state,
-        requests: state.requests + 1,
-        tokens: state.tokens + Math.max(0, tokens),
-        lastUsedAt: now,
-        lastSuccessAt: now,
-        failures: 0,
-        cooldownUntil: undefined,
-        health: 'healthy',
-        metadata: { ...state.metadata, ...(smoothedLatency !== undefined ? { latencyMs: smoothedLatency } : {}) },
-      };
-    });
-  }
-
-  private async markFailure(id: string, error: GatewayError): Promise<void> {
-    await this.stateStore.update(id, (current) => {
-      const state = current ?? { requests: 0, tokens: 0, failures: 0, health: 'healthy' as const };
-      const now = Date.now();
-      const failures = state.failures + 1;
-      return { ...state, lastFailureAt: now, failures, health: error.category === 'RateLimitError' ? 'rate_limited' : error.category === 'AuthenticationError' ? 'authentication_failure' : 'degraded', cooldownUntil: now + (error.retryAfterMs ?? this.config.cooldownMs) };
-    });
-  }
-
-  private async backoff(attempt: number, retryAfterMs?: number): Promise<void> {
-    const delay = retryAfterMs ?? Math.min(10_000, 250 * 2 ** attempt) + Math.floor(Math.random() * 100);
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
+  private estimatedTokens(request: GenerateRequest): number { const options = request.options ?? {}; const input = request.messages?.reduce((sum, message) => sum + Math.ceil(message.content.length / 4), 0) ?? Math.ceil(request.prompt.length / 4); return input + Math.max(0, options.maxTokens ?? 0); }
+  private withCost(usage: GenerateResult['usage'], account: AccountConfig, model: ModelInfo): GenerateResult['usage'] { const inputRate = model.inputCostPerMillion ?? account.costPerMillionInput; const outputRate = model.outputCostPerMillion ?? account.costPerMillionOutput; if (inputRate === undefined && outputRate === undefined) return usage; const inputTokens = usage.inputTokens ?? 0; const outputTokens = usage.outputTokens ?? 0; const estimatedCost = (inputTokens * (inputRate ?? 0) + outputTokens * (outputRate ?? 0)) / 1_000_000; return { ...usage, estimatedCost, currency: usage.currency ?? 'USD' }; }
+  private async markSuccess(id: string, tokens: number, latencyMs?: number): Promise<void> { await this.stateStore.update(id, (current) => { const state = current ?? { requests: 0, tokens: 0, failures: 0, health: 'healthy' as const }; const now = Date.now(); const previousLatency = Number(state.metadata?.latencyMs); const smoothedLatency = Number.isFinite(previousLatency) && previousLatency > 0 && latencyMs !== undefined ? previousLatency * 0.7 + latencyMs * 0.3 : latencyMs; return { ...state, requests: state.requests + 1, tokens: state.tokens + Math.max(0, tokens), lastUsedAt: now, lastSuccessAt: now, failures: 0, cooldownUntil: undefined, health: 'healthy', metadata: { ...state.metadata, ...(smoothedLatency !== undefined ? { latencyMs: smoothedLatency } : {}) } }; }); }
+  private async markFailure(id: string, error: GatewayError): Promise<void> { await this.stateStore.update(id, (current) => { const state = current ?? { requests: 0, tokens: 0, failures: 0, health: 'healthy' as const }; const now = Date.now(); const failures = state.failures + 1; return { ...state, lastFailureAt: now, failures, health: error.category === 'RateLimitError' ? 'rate_limited' : error.category === 'AuthenticationError' ? 'authentication_failure' : 'degraded', cooldownUntil: now + (error.retryAfterMs ?? this.config.cooldownMs) }; }); }
+  private async backoff(attempt: number, retryAfterMs?: number): Promise<void> { const delay = retryAfterMs ?? Math.min(10_000, 250 * 2 ** attempt) + Math.floor(Math.random() * 100); await new Promise((resolve) => setTimeout(resolve, delay)); }
 }
