@@ -19,9 +19,7 @@ const config = loadConfigFromEnvironment();
 const adapters = [new GeminiAdapter(), new GroqAdapter(), new OpenRouterAdapter(), new CloudflareWorkersAIAdapter()];
 const configuredProviders = new Set(flattenAccounts(config).map((account) => account.provider));
 const availableProviders = new Set(adapters.map((adapter) => adapter.name));
-for (const provider of configuredProviders) {
-  if (!availableProviders.has(provider)) throw new Error(`No adapter is registered for configured provider: ${provider}`);
-}
+for (const provider of configuredProviders) if (!availableProviders.has(provider)) throw new Error(`No adapter is registered for configured provider: ${provider}`);
 
 let redisClient: ReturnType<typeof createClient> | undefined;
 let stateStore: StateStore;
@@ -38,20 +36,13 @@ if (process.env.REDIS_URL) {
 const accounts = flattenAccounts(config);
 if (!accounts.length) throw new Error('No enabled gateway accounts are configured');
 
-const gateway = new LLMGateway({
-  accounts,
-  adapters,
-  strategy: config.strategy,
-  maxRetries: config.maxRetries,
-  cooldownMs: config.cooldownMs,
-  stateStore,
-}, new EnvironmentCredentialStore());
-
-const handler = createGatewayHttpHandler({ accounts, adapters, apiKey, gateway });
+const gatewayConfig = { accounts, adapters, strategy: config.strategy, maxRetries: config.maxRetries, cooldownMs: config.cooldownMs, stateStore };
+const gateway = new LLMGateway(gatewayConfig, new EnvironmentCredentialStore());
+const maxBodyBytes = Number(process.env.GATEWAY_REQUEST_BODY_LIMIT_BYTES ?? 1_048_576);
+const handler = createGatewayHttpHandler({ ...gatewayConfig, apiKey, maxBodyBytes });
 
 const server = createServer(async (req, res) => {
   try {
-    const maxBodyBytes = Number(process.env.GATEWAY_REQUEST_BODY_LIMIT_BYTES ?? 1_048_576);
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of req) {
@@ -60,7 +51,7 @@ const server = createServer(async (req, res) => {
       if (size > maxBodyBytes) {
         res.statusCode = 413;
         res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify({ error: 'RequestTooLarge' }));
+        res.end(JSON.stringify({ error: 'PayloadTooLarge' }));
         req.destroy();
         return;
       }
@@ -68,15 +59,7 @@ const server = createServer(async (req, res) => {
     }
     const raw = Buffer.concat(chunks).toString('utf8');
     const body = raw ? JSON.parse(raw) : {};
-    const result = await handler({
-      method: req.method ?? 'GET',
-      path: req.url ?? '/',
-      body,
-      headers: {
-        authorization: req.headers.authorization,
-        'x-request-id': req.headers['x-request-id'] as string | undefined,
-      },
-    });
+    const result = await handler({ method: req.method ?? 'GET', path: req.url ?? '/', body, headers: { authorization: req.headers.authorization, 'x-request-id': req.headers['x-request-id'] as string | undefined } });
     res.statusCode = result.status;
     for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
     res.end(JSON.stringify(result.body));
@@ -97,5 +80,4 @@ const shutdown = async (signal: string) => {
 };
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
 process.once('SIGINT', () => void shutdown('SIGINT'));
-
 server.listen(port, '0.0.0.0', () => console.log(`LLM gateway listening on ${port}`));
