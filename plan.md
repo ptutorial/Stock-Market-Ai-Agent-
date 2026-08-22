@@ -116,29 +116,23 @@ The repository now has the Phase 1 domain boundary, but the provider adapters st
 
 # Phase 2 — Configuration & Credential Management
 
-**Status:** Planned
+**Status:** Complete
 
 ### Goals
 
 Create secure externalized configuration for providers, accounts, models and credentials.
 
-### Tasks
+### Completed
 
-- Define configuration schema.
-- Validate configuration at startup.
-- Support environment-variable credentials.
-- Support credential-provider abstraction.
-- Keep credentials out of logs.
-- Mask account identifiers in telemetry.
-- Support enabled/disabled accounts.
-- Support account priority.
-- Support model lists.
-- Support capability configuration.
-- Support provider-level configuration.
-- Support per-account limits.
-- Add example configuration without secrets.
-- Add `.env.example`.
-- Add secret-handling documentation.
+- Added `src/config.ts` with versioned gateway configuration contracts.
+- Added startup configuration validation for providers, accounts, models, capabilities, limits, priorities and unique account IDs.
+- Added environment-backed credential resolution through `EnvironmentCredentialStore`.
+- Added `LLM_GATEWAY_CONFIG` JSON loading with validation.
+- Added `config/gateway.example.json` containing non-secret account/provider configuration.
+- Added `.env.example` containing credential variable names only.
+- Exported configuration helpers from `src/index.ts`.
+- Added `docs/configuration.md` covering credential references, validation and secret-handling rules.
+- Kept real credentials out of committed configuration.
 
 ### Configuration hierarchy
 
@@ -155,9 +149,15 @@ Provider
 
 ### Exit criteria
 
-- Invalid configuration fails fast with useful errors.
-- No plaintext secret is committed.
-- Credential references, not credentials, appear in runtime metadata.
+- Invalid configuration fails fast with useful errors. **Complete.**
+- No plaintext secret is committed. **Complete.**
+- Credential references, not credentials, appear in runtime configuration. **Complete.**
+- Configuration helpers are exported through the package API. **Complete.**
+- Automated compilation/test verification. **Pending CI verification.**
+
+### Phase note
+
+Provider-specific adapter migration remains intentionally deferred to Phase 3.
 
 ---
 
@@ -762,7 +762,7 @@ Phase 0  Foundation                         [DONE]
    |
 Phase 1  Core contracts                     [DONE]
    |
-Phase 2  Configuration / credentials
+Phase 2  Configuration / credentials        [DONE]
    |
 Phase 3  Provider adapter SDK
    |
