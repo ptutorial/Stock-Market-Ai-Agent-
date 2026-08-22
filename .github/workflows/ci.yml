@@ -13,30 +13,32 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build
         run: npm run build
 
       - name: Run tests with detailed failure output
+        shell: bash
         run: |
-          set -o pipefail
+          set +e
           node --test --test-reporter=tap test/*.test.mjs 2>&1 | tee test-output.log
+          test_status=${PIPESTATUS[0]}
 
-      - name: Print failed test diagnostics
-        if: failure()
-        run: |
           echo "===== FAILED TESTS ====="
           grep -n -B 8 -A 35 -E '^not ok |failureType:|AssertionError|ERR_ASSERTION|error: ' test-output.log || true
+
           echo "===== TEST SUMMARY ====="
           grep -E '^1\.\.|^# tests |^# pass |^# fail |^# skipped |^# cancelled ' test-output.log || true
 
+          exit "$test_status"
+
       - name: Upload test output
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-failure-output
