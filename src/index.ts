@@ -1,6 +1,7 @@
 export * from './domain.js';
 export * from './types.js';
 export * from './errors.js';
+export * from './config.js';
 export * from './gateway.js';
 export { GeminiAdapter } from './providers/gemini.js';
 export { GroqAdapter, OpenRouterAdapter } from './providers/openai-compatible.js';
