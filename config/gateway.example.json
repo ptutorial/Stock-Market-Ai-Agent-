@@ -15,10 +15,7 @@
           "models": ["gemini-model-id"],
           "capabilities": ["chat", "streaming", "structured_output", "tool_calling", "vision"],
           "priority": 100,
-          "limits": {
-            "rpm": 60,
-            "tpm": 100000
-          }
+          "limits": { "rpm": 60, "tpm": 100000 }
         }
       ]
     },
@@ -60,7 +57,8 @@
           "credentialRef": "CLOUDFLARE_API_TOKEN",
           "models": ["@cf/provider/model-id"],
           "capabilities": ["chat", "streaming"],
-          "priority": 70
+          "priority": 70,
+          "metadata": { "accountId": "your-cloudflare-account-id" }
         }
       ]
     }
