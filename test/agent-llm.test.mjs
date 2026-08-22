@@ -48,8 +48,16 @@ test('agent LLM falls back to the next provider after a primary failure', async 
 
 test('agent runtime invokes configured LLM and executes only declared tools', async () => {
   const tools = new ToolRegistry();
-  tools.register(createTool({ name: 'market_price', inputSchema: { type: 'object' } }, async () => ({ price: 100 })));
-  tools.register(createTool({ name: 'technical_indicators', inputSchema: { type: 'object' } }, async () => ({ trend: 'up' })));
+  for (const name of [
+    'market_price',
+    'technical_indicators',
+    'fundamentals',
+    'market_news',
+    'sector_strength',
+    'risk_metrics',
+  ]) {
+    tools.register(createTool({ name, inputSchema: { type: 'object' } }, async () => ({ ok: true })));
+  }
   const agents = createStockAgents(tools);
   const calls = [];
   const agentLLM = {
