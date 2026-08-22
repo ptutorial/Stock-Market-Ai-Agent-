@@ -2,7 +2,6 @@ import { createServer } from 'node:http';
 import { createClient } from 'redis';
 import { createGatewayHttpHandler } from './http.js';
 import { flattenAccounts, loadConfigFromEnvironment } from './config.js';
-import { LLMGateway, EnvironmentCredentialStore } from './gateway.js';
 import { GeminiAdapter } from './providers/gemini.js';
 import { CloudflareWorkersAIAdapter } from './providers/cloudflare.js';
 import { GroqAdapter, OpenRouterAdapter } from './providers/openai-compatible.js';
@@ -35,11 +34,9 @@ if (process.env.REDIS_URL) {
 
 const accounts = flattenAccounts(config);
 if (!accounts.length) throw new Error('No enabled gateway accounts are configured');
-
-const gatewayConfig = { accounts, adapters, strategy: config.strategy, maxRetries: config.maxRetries, cooldownMs: config.cooldownMs, stateStore };
-const gateway = new LLMGateway(gatewayConfig, new EnvironmentCredentialStore());
 const maxBodyBytes = Number(process.env.GATEWAY_REQUEST_BODY_LIMIT_BYTES ?? 1_048_576);
-const handler = createGatewayHttpHandler({ ...gatewayConfig, apiKey, maxBodyBytes });
+const gatewayOptions = { accounts, adapters, strategy: config.strategy, maxRetries: config.maxRetries, cooldownMs: config.cooldownMs, stateStore };
+const handler = createGatewayHttpHandler({ ...gatewayOptions, apiKey, maxBodyBytes });
 
 const server = createServer(async (req, res) => {
   try {
