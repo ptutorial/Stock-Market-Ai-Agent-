@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { GatewayError, normalizeError } from './errors.js';
-import type { AccountConfig, AccountState, Capability, GenerateRequest, GenerateResult, ModelInfo, ProviderAdapter, RoutingStrategy, StreamChunk, TaskType } from './domain.js';
+import type { AccountConfig, AccountState, Capability, GenerateRequest, GenerateResult, ModelInfo, ProviderAdapter, ProviderName, RoutingStrategy, StreamChunk, TaskType } from './domain.js';
 import { InMemoryStateStore } from './state.js';
 import type { StateStore } from './state.js';
 import { ModelRegistry } from './model-registry.js';
@@ -12,6 +12,7 @@ export class EnvironmentCredentialStore implements CredentialStore { async get(c
 export class InMemoryUsageSink implements UsageSink { readonly events: Record<string, unknown>[] = []; record(event: Record<string, unknown>): void { this.events.push(event); } }
 export interface GatewayConfig { accounts: AccountConfig[]; adapters: ProviderAdapter[]; strategy?: RoutingStrategy; providerOrder?: string[]; fallbackProviders?: string[]; maxRetries?: number; cooldownMs?: number; stateStore?: StateStore; modelRegistry?: ModelRegistry; }
 interface Candidate { account: AccountConfig; state: AccountState; adapter: ProviderAdapter; model: ModelInfo; score: number; }
+type AgentRoutingOptions = GenerateRequest['options'] & { provider?: ProviderName; requestId?: string };
 
 export class LLMGateway {
   private readonly adapters = new Map<string, ProviderAdapter>();
@@ -24,10 +25,11 @@ export class LLMGateway {
   constructor(private readonly cfg: GatewayConfig, credentialStore: CredentialStore = new EnvironmentCredentialStore(), usage: UsageSink = new InMemoryUsageSink()) { this.credentialStore = credentialStore; this.usage = usage; this.stateStore = cfg.stateStore ?? new InMemoryStateStore(); this.modelRegistry = cfg.modelRegistry ?? new ModelRegistry(); this.router = new ModelRouter({ strategy: cfg.strategy ?? 'priority' }); this.config = { maxRetries: cfg.maxRetries ?? 2, cooldownMs: cfg.cooldownMs ?? 30_000 }; for (const adapter of cfg.adapters) this.adapters.set(adapter.name, adapter); for (const account of cfg.accounts) void this.stateStore.set(account.id, { requests: 0, tokens: 0, failures: 0, health: account.enabled === false ? 'disabled' : 'healthy' }); }
 
   async generate(task: TaskType, prompt: string, options: GenerateRequest['options'] = {}): Promise<GenerateResult> {
+    const routingOptions = options as AgentRoutingOptions;
     const request: GenerateRequest = { prompt, options: { ...options, task: options.task ?? task } };
     const candidates = await this.selectCandidates(request);
     if (!candidates.length) throw new GatewayError('ProviderUnavailableError', 'No eligible provider/account/model is available');
-    const requestId = randomUUID();
+    const requestId = routingOptions.requestId ?? randomUUID();
     const reservationTokens = this.estimatedTokens(request);
     let lastError: GatewayError | undefined;
     for (const candidate of candidates) {
@@ -59,7 +61,8 @@ export class LLMGateway {
       const request: GenerateRequest = { prompt, options: { ...options, task: options.task ?? task } };
       const candidates = await self.selectCandidates(request);
       if (!candidates.length) throw new GatewayError('ProviderUnavailableError', 'No eligible provider/account/model is available');
-      const requestId = randomUUID(); const reservationTokens = self.estimatedTokens(request); let startedDelivery = false; let lastError: GatewayError | undefined;
+      const routingOptions = options as AgentRoutingOptions;
+      const requestId = routingOptions.requestId ?? randomUUID(); const reservationTokens = self.estimatedTokens(request); let startedDelivery = false; let lastError: GatewayError | undefined;
       for (const candidate of candidates) {
         try {
           const credential = await self.credentialStore.get(candidate.account.credentialRef);
@@ -74,12 +77,13 @@ export class LLMGateway {
     })();
   }
 
-  private providerOrder(): string[] {
+  private providerOrder(provider?: ProviderName): string[] {
+    if (provider) return [provider];
     return this.cfg.providerOrder ?? this.cfg.fallbackProviders ?? [...this.adapters.keys()];
   }
 
   private async selectCandidates(request: GenerateRequest): Promise<Candidate[]> {
-    const options = request.options ?? {}; const required: Capability[] = options.capabilities ?? ['chat']; const providerOrder = this.providerOrder(); const result: Candidate[] = [];
+    const options = request.options ?? {}; const routingOptions = options as AgentRoutingOptions; const required: Capability[] = options.capabilities ?? ['chat']; const providerOrder = this.providerOrder(routingOptions.provider); const result: Candidate[] = [];
     for (const provider of providerOrder) {
       const adapter = this.adapters.get(provider); if (!adapter) continue;
       for (const account of this.cfg.accounts.filter((item) => item.provider === provider && item.enabled !== false)) {
