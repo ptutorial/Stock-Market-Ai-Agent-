@@ -1,6 +1,8 @@
 import type { AgentRole } from './agents.js';
+import type { Capability, GenerateResult, TaskType, ToolDefinition } from './domain.js';
+import type { LLMGateway } from './gateway.js';
 
-export type LLMProvider = 'gemini' | 'openai-compatible' | 'cloudflare' | (string & {});
+export type LLMProvider = 'gemini' | 'groq' | 'openrouter' | 'cloudflare';
 
 export type AgentModelPolicy = {
   name: string;
@@ -15,16 +17,20 @@ export type AgentLLMRequest = {
   requestId: string;
   agentId: string;
   role: AgentRole;
+  task: TaskType;
   systemPrompt: string;
   input: unknown;
   policy: AgentModelPolicy;
+  capabilities?: Capability[];
+  tools?: ToolDefinition[];
 };
 
 export type AgentLLMResponse = {
   output: string;
+  toolCalls?: GenerateResult['toolCalls'];
+  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number; estimatedCost?: number };
   provider: LLMProvider;
   model: string;
-  usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
   estimatedCost?: number;
   fallback?: boolean;
 };
@@ -38,8 +44,11 @@ export type MultiProviderGateway = {
     requestId: string;
     provider: LLMProvider;
     model: string;
+    task: TaskType;
     systemPrompt: string;
     input: unknown;
+    capabilities?: Capability[];
+    tools?: ToolDefinition[];
     maxInputTokens?: number;
     maxOutputTokens?: number;
   }): Promise<AgentLLMResponse>;
@@ -58,11 +67,17 @@ export class MultiProviderAgentLLM implements AgentLLMGateway {
           requestId: request.requestId,
           provider: candidate.provider,
           model: candidate.model,
+          task: request.task,
           systemPrompt: request.systemPrompt,
           input: request.input,
+          capabilities: request.capabilities,
+          tools: request.tools,
           maxInputTokens: request.policy.maxInputTokens,
           maxOutputTokens: request.policy.maxOutputTokens,
         });
+        if (request.policy.maxCostPerRequest !== undefined && (result.estimatedCost ?? 0) > request.policy.maxCostPerRequest) {
+          throw new Error(`LLM request cost ${result.estimatedCost ?? 0} exceeds policy limit ${request.policy.maxCostPerRequest}`);
+        }
         return { ...result, provider: candidate.provider, model: candidate.model, fallback: index > 0 };
       } catch (error) {
         lastError = error;
@@ -72,13 +87,38 @@ export class MultiProviderAgentLLM implements AgentLLMGateway {
   }
 }
 
+export class LLMGatewayAgentAdapter implements MultiProviderGateway {
+  constructor(private readonly gateway: LLMGateway) {}
+
+  async generate(request: Parameters<MultiProviderGateway['generate']>[0]): Promise<AgentLLMResponse> {
+    const result = await this.gateway.generate(request.task, request.systemPrompt, {
+      task: request.task,
+      model: request.model,
+      capabilities: request.capabilities,
+      tools: request.tools,
+      maxTokens: request.maxOutputTokens,
+      // These fields are consumed by the gateway as internal routing metadata.
+      ...(request.provider ? { provider: request.provider } : {}),
+      ...(request.requestId ? { requestId: request.requestId } : {}),
+    } as Parameters<LLMGateway['generate']>[2] & { provider?: LLMProvider; requestId?: string });
+    return {
+      output: result.text,
+      toolCalls: result.toolCalls,
+      usage: result.usage,
+      estimatedCost: result.usage.estimatedCost,
+      provider: request.provider,
+      model: result.model ?? request.model,
+    };
+  }
+}
+
 export const DEFAULT_AGENT_MODEL_POLICIES: Record<AgentRole, AgentModelPolicy> = {
-  technical: { name: 'technical-fast', primary: { provider: 'gemini', model: 'gemini-2.5-flash' }, fallback: [{ provider: 'openai-compatible', model: 'gpt-4o-mini' }], maxOutputTokens: 1200 },
-  fundamental: { name: 'fundamental-reasoning', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openai-compatible', model: 'gpt-4o' }], maxOutputTokens: 1800 },
-  news: { name: 'news-fast', primary: { provider: 'gemini', model: 'gemini-2.5-flash' }, fallback: [{ provider: 'openai-compatible', model: 'gpt-4o-mini' }], maxOutputTokens: 1200 },
-  sector: { name: 'sector-fast', primary: { provider: 'gemini', model: 'gemini-2.5-flash' }, fallback: [{ provider: 'openai-compatible', model: 'gpt-4o-mini' }], maxOutputTokens: 1200 },
-  risk: { name: 'risk-reasoning', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openai-compatible', model: 'gpt-4o' }], maxOutputTokens: 1800 },
-  recommendation: { name: 'recommendation-strong', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openai-compatible', model: 'gpt-4o' }], maxOutputTokens: 2200 },
-  critic: { name: 'critic-strong', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openai-compatible', model: 'gpt-4o' }], maxOutputTokens: 1800 },
-  final_decision: { name: 'final-strong', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openai-compatible', model: 'gpt-4o' }], maxOutputTokens: 1800 },
+  technical: { name: 'technical-fast', primary: { provider: 'gemini', model: 'gemini-2.5-flash' }, fallback: [{ provider: 'groq', model: 'llama-3.3-70b-versatile' }], maxOutputTokens: 1200 },
+  fundamental: { name: 'fundamental-reasoning', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
+  news: { name: 'news-fast', primary: { provider: 'gemini', model: 'gemini-2.5-flash' }, fallback: [{ provider: 'groq', model: 'llama-3.3-70b-versatile' }], maxOutputTokens: 1200 },
+  sector: { name: 'sector-fast', primary: { provider: 'gemini', model: 'gemini-2.5-flash' }, fallback: [{ provider: 'groq', model: 'llama-3.3-70b-versatile' }], maxOutputTokens: 1200 },
+  risk: { name: 'risk-reasoning', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
+  recommendation: { name: 'recommendation-strong', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 2200 },
+  critic: { name: 'critic-strong', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
+  final_decision: { name: 'final-strong', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
 };
