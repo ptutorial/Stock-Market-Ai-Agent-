@@ -1,0 +1,19 @@
+export interface MetricLabels { provider?: string; accountId?: string; model?: string; operation?: string; status?: string; errorCategory?: string; }
+export interface RequestObservation { requestId: string; provider?: string; accountId?: string; model?: string; operation: 'generate' | 'stream' | 'health_check'; startedAt: number; completedAt?: number; latencyMs?: number; success?: boolean; errorCategory?: string; inputTokens?: number; outputTokens?: number; totalTokens?: number; estimatedCost?: number; }
+export interface CounterMetric { name: string; value: number; labels: MetricLabels; }
+export interface HistogramMetric { name: string; count: number; sum: number; min?: number; max?: number; labels: MetricLabels; }
+export interface ObservabilitySink { increment(name: string, labels?: MetricLabels, value?: number): void; observe(name: string, value: number, labels?: MetricLabels): void; event?(event: RequestObservation): void; }
+
+export class InMemoryMetrics implements ObservabilitySink {
+  private readonly counters = new Map<string, CounterMetric>();
+  private readonly histograms = new Map<string, HistogramMetric>();
+  private readonly events: RequestObservation[] = [];
+  increment(name: string, labels: MetricLabels = {}, value = 1): void { const key = metricKey(name, labels); const current = this.counters.get(key) ?? { name, value: 0, labels: { ...labels } }; current.value += value; this.counters.set(key, current); }
+  observe(name: string, value: number, labels: MetricLabels = {}): void { const key = metricKey(name, labels); const current = this.histograms.get(key) ?? { name, count: 0, sum: 0, labels: { ...labels } }; current.count += 1; current.sum += value; current.min = current.min === undefined ? value : Math.min(current.min, value); current.max = current.max === undefined ? value : Math.max(current.max, value); this.histograms.set(key, current); }
+  event(event: RequestObservation): void { this.events.push({ ...event }); }
+  snapshot() { return { counters: [...this.counters.values()].map((x) => ({ ...x, labels: { ...x.labels } })), histograms: [...this.histograms.values()].map((x) => ({ ...x, labels: { ...x.labels } })), events: this.events.map((x) => ({ ...x })) }; }
+}
+export class NoopObservability implements ObservabilitySink { increment(): void {} observe(): void {} event(): void {} }
+export function sanitizeError(error: unknown): { category?: string; message: string } { if (error && typeof error === 'object') { const value = error as { category?: unknown; message?: unknown }; return { category: typeof value.category === 'string' ? value.category : undefined, message: typeof value.message === 'string' ? value.message : 'Unknown error' }; } return { message: error instanceof Error ? error.message : String(error) }; }
+export function recordRequest(sink: ObservabilitySink, observation: RequestObservation): void { const labels: MetricLabels = { provider: observation.provider, accountId: observation.accountId, model: observation.model, operation: observation.operation, status: observation.success === undefined ? 'unknown' : observation.success ? 'success' : 'error', errorCategory: observation.errorCategory }; sink.increment('gateway_requests_total', labels); if (observation.latencyMs !== undefined) sink.observe('gateway_request_latency_ms', observation.latencyMs, labels); if (observation.totalTokens !== undefined) sink.increment('gateway_tokens_total', labels, observation.totalTokens); if (observation.estimatedCost !== undefined) sink.increment('gateway_estimated_cost_total', labels, observation.estimatedCost); sink.event?.(observation); }
+function metricKey(name: string, labels: MetricLabels): string { return `${name}|${Object.entries(labels).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${String(value)}`).join(',')}`; }
