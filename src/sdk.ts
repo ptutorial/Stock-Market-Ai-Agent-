@@ -18,6 +18,15 @@ export interface GenerateInput {
   options?: GenerateOptions;
 }
 
+type GatewayBuilderState = {
+  credentialStore?: CredentialStore;
+  usageSink?: UsageSink;
+  strategy?: RoutingStrategy;
+  fallbackProviders?: string[];
+  maxRetries?: number;
+  cooldownMs?: number;
+};
+
 export class GatewayClient {
   private readonly gateway: LLMGateway;
 
@@ -43,14 +52,9 @@ export class GatewayClient {
 }
 
 export class GatewayClientBuilder {
-  private accounts: AccountConfig[] = [];
-  private adapters: ProviderAdapter[] = [];
-  private _credentialStore?: CredentialStore;
-  private _usageSink?: UsageSink;
-  private _strategy?: RoutingStrategy;
-  private _fallbackProviders?: string[];
-  private _maxRetries?: number;
-  private _cooldownMs?: number;
+  private readonly accounts: AccountConfig[] = [];
+  private readonly adapters: ProviderAdapter[] = [];
+  private readonly state: GatewayBuilderState = {};
 
   addAccount(account: AccountConfig): this {
     this.accounts.push(account);
@@ -73,54 +77,54 @@ export class GatewayClientBuilder {
   }
 
   credentialStore(store: CredentialStore): this {
-    this._credentialStore = store;
+    this.state.credentialStore = store;
     return this;
   }
 
   usageSink(sink: UsageSink): this {
-    this._usageSink = sink;
+    this.state.usageSink = sink;
     return this;
   }
 
   strategy(value: RoutingStrategy): this {
-    this._strategy = value;
+    this.state.strategy = value;
     return this;
   }
 
   fallbackProviders(value: string[]): this {
-    this._fallbackProviders = [...value];
+    this.state.fallbackProviders = [...value];
     return this;
   }
 
   maxRetries(value: number): this {
-    this._maxRetries = value;
+    this.state.maxRetries = value;
     return this;
   }
 
   cooldownMs(value: number): this {
-    this._cooldownMs = value;
+    this.state.cooldownMs = value;
     return this;
   }
 
   build(): GatewayClient {
     if (!this.accounts.length) throw new Error('At least one account is required');
     if (!this.adapters.length) throw new Error('At least one provider adapter is required');
-    if (this._maxRetries !== undefined && (!Number.isInteger(this._maxRetries) || this._maxRetries < 0)) {
+    if (this.state.maxRetries !== undefined && (!Number.isInteger(this.state.maxRetries) || this.state.maxRetries < 0)) {
       throw new Error('maxRetries must be a non-negative integer');
     }
-    if (this._cooldownMs !== undefined && (!Number.isFinite(this._cooldownMs) || this._cooldownMs < 0)) {
+    if (this.state.cooldownMs !== undefined && (!Number.isFinite(this.state.cooldownMs) || this.state.cooldownMs < 0)) {
       throw new Error('cooldownMs must be non-negative');
     }
 
     return new GatewayClient({
       accounts: [...this.accounts],
       adapters: [...this.adapters],
-      credentialStore: this._credentialStore,
-      usageSink: this._usageSink,
-      strategy: this._strategy,
-      fallbackProviders: this._fallbackProviders,
-      maxRetries: this._maxRetries,
-      cooldownMs: this._cooldownMs,
+      credentialStore: this.state.credentialStore,
+      usageSink: this.state.usageSink,
+      strategy: this.state.strategy,
+      fallbackProviders: this.state.fallbackProviders,
+      maxRetries: this.state.maxRetries,
+      cooldownMs: this.state.cooldownMs,
     });
   }
 }
