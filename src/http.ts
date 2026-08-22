@@ -18,8 +18,14 @@ export function createGatewayHttpHandler(options: GatewayHttpServerOptions) {
 
     if (method === 'GET' && path === '/health') return { status: 200, headers, body: { status: 'ok', requestId } };
     if (method === 'GET' && path === '/ready') {
-      const ready = options.accounts.length > 0 && options.adapters.length > 0;
-      return { status: ready ? 200 : 503, headers, body: { status: ready ? 'ready' : 'not_ready', requestId } };
+      const accounts = options.accounts.filter((account) => account.enabled !== false);
+      let healthy = 0;
+      for (const account of accounts) {
+        const state = await options.stateStore?.get(account.id);
+        if (!state || (state.health !== 'disabled' && state.health !== 'authentication_failure' && (!state.cooldownUntil || state.cooldownUntil <= Date.now()))) healthy += 1;
+      }
+      const ready = accounts.length > 0 && options.adapters.length > 0 && healthy > 0;
+      return { status: ready ? 200 : 503, headers, body: { status: ready ? 'ready' : 'not_ready', accounts: accounts.length, healthyAccounts: healthy, requestId } };
     }
     if (method !== 'POST') return { status: 405, headers, body: { error: 'MethodNotAllowed', requestId } };
     if (options.apiKey && request.headers?.authorization !== `Bearer ${options.apiKey}`) return { status: 401, headers, body: { error: 'Unauthorized', requestId } };
