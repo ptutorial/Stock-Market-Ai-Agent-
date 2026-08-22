@@ -6,6 +6,7 @@ export * from './router.js';
 export * from './limits.js';
 export * from './retry.js';
 export * from './state.js';
+export * from './usage.js';
 export * from './gateway.js';
 export { GeminiAdapter } from './providers/gemini.js';
 export { GroqAdapter, OpenRouterAdapter } from './providers/openai-compatible.js';
