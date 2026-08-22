@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { AccountState } from './domain.js';
 import type { StateStore, RedisLikeClient } from './state.js';
 
@@ -18,10 +19,24 @@ export class AtomicRedisStateStore implements StateStore {
   }
 
   async update(accountId: string, updater: (current: AccountState | undefined) => AccountState): Promise<AccountState> {
-    const current = await this.get(accountId);
-    const next = updater(current);
-    await this.set(accountId, next);
-    return next;
+    const lockKey = `${this.prefix}:lock:${accountId}`;
+    const token = randomUUID();
+    const acquireDeadline = Date.now() + 5_000;
+    while (Date.now() < acquireDeadline) {
+      const acquired = await this.redis.set(lockKey, token, 'NX', 'PX', 10_000);
+      if (acquired === 'OK') break;
+      await new Promise((resolve) => setTimeout(resolve, 25 + Math.floor(Math.random() * 25)));
+    }
+    const owned = await this.redis.get(lockKey) === token;
+    if (!owned) throw new Error(`Timed out acquiring state lock for account ${accountId}`);
+    try {
+      const current = await this.get(accountId);
+      const next = updater(current);
+      await this.set(accountId, next);
+      return next;
+    } finally {
+      await this.redis.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end", 1, lockKey, token);
+    }
   }
 
   async reserve(accountId: string, tokens: number, limits: { rpm?: number; rpd?: number; tpm?: number; tpd?: number }, now = Date.now()): Promise<boolean> {
