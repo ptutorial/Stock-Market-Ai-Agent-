@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "strategy": "priority",
+  "maxRetries": 2,
+  "cooldownMs": 30000,
+  "providers": [
+    {
+      "name": "gemini",
+      "enabled": true,
+      "accounts": [
+        {
+          "id": "gemini-primary",
+          "provider": "gemini",
+          "credentialRef": "GEMINI_API_KEY",
+          "models": ["gemini-model-id"],
+          "capabilities": ["chat", "streaming", "structured_output", "tool_calling", "vision"],
+          "priority": 100,
+          "limits": {
+            "rpm": 60,
+            "tpm": 100000
+          }
+        }
+      ]
+    },
+    {
+      "name": "groq",
+      "enabled": true,
+      "accounts": [
+        {
+          "id": "groq-primary",
+          "provider": "groq",
+          "credentialRef": "GROQ_API_KEY",
+          "models": ["groq-model-id"],
+          "capabilities": ["chat", "streaming", "tool_calling"],
+          "priority": 90
+        }
+      ]
+    },
+    {
+      "name": "openrouter",
+      "enabled": true,
+      "accounts": [
+        {
+          "id": "openrouter-primary",
+          "provider": "openrouter",
+          "credentialRef": "OPENROUTER_API_KEY",
+          "models": ["provider/model-id"],
+          "capabilities": ["chat", "streaming", "structured_output", "tool_calling", "vision"],
+          "priority": 80
+        }
+      ]
+    },
+    {
+      "name": "cloudflare",
+      "enabled": true,
+      "accounts": [
+        {
+          "id": "cloudflare-primary",
+          "provider": "cloudflare",
+          "credentialRef": "CLOUDFLARE_API_TOKEN",
+          "models": ["@cf/provider/model-id"],
+          "capabilities": ["chat", "streaming"],
+          "priority": 70
+        }
+      ]
+    }
+  ]
+}
