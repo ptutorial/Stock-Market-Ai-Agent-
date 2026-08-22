@@ -1,16 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { GatewayError, normalizeError } from './errors.js';
-import type {
-  AccountConfig, AccountState, Capability, GenerateRequest, GenerateResult,
-  ModelInfo, ProviderAdapter, RoutingStrategy, StreamChunk, TaskType,
-} from './domain.js';
+import type { AccountConfig, AccountState, Capability, GenerateRequest, GenerateResult, ModelInfo, ProviderAdapter, RoutingStrategy, StreamChunk, TaskType } from './domain.js';
 import { InMemoryStateStore } from './state.js';
 import type { StateStore } from './state.js';
 import { ModelRegistry } from './model-registry.js';
 
 export interface CredentialStore { get(credentialRef: string): Promise<string>; }
 export interface UsageSink { record(event: Record<string, unknown>): Promise<void> | void; }
-
 export class EnvironmentCredentialStore implements CredentialStore {
   async get(credentialRef: string): Promise<string> {
     const value = process.env[credentialRef];
@@ -18,12 +14,10 @@ export class EnvironmentCredentialStore implements CredentialStore {
     return value;
   }
 }
-
 export class InMemoryUsageSink implements UsageSink {
   readonly events: Record<string, unknown>[] = [];
   record(event: Record<string, unknown>): void { this.events.push(event); }
 }
-
 export interface GatewayConfig {
   accounts: AccountConfig[];
   adapters: ProviderAdapter[];
@@ -34,7 +28,6 @@ export interface GatewayConfig {
   stateStore?: StateStore;
   modelRegistry?: ModelRegistry;
 }
-
 interface Candidate { account: AccountConfig; state: AccountState; adapter: ProviderAdapter; model: ModelInfo; score: number; }
 
 export class LLMGateway {
@@ -45,23 +38,14 @@ export class LLMGateway {
   private readonly usage: UsageSink;
   private readonly config: Required<Pick<GatewayConfig, 'maxRetries' | 'cooldownMs'>>;
 
-  constructor(
-    private readonly cfg: GatewayConfig,
-    credentialStore: CredentialStore = new EnvironmentCredentialStore(),
-    usage: UsageSink = new InMemoryUsageSink(),
-  ) {
+  constructor(private readonly cfg: GatewayConfig, credentialStore: CredentialStore = new EnvironmentCredentialStore(), usage: UsageSink = new InMemoryUsageSink()) {
     this.credentialStore = credentialStore;
     this.usage = usage;
     this.stateStore = cfg.stateStore ?? new InMemoryStateStore();
     this.modelRegistry = cfg.modelRegistry ?? new ModelRegistry();
     this.config = { maxRetries: cfg.maxRetries ?? 2, cooldownMs: cfg.cooldownMs ?? 30_000 };
     for (const adapter of cfg.adapters) this.adapters.set(adapter.name, adapter);
-    for (const account of cfg.accounts) {
-      void this.stateStore.set(account.id, {
-        requests: 0, tokens: 0, failures: 0,
-        health: account.enabled === false ? 'disabled' : 'healthy',
-      });
-    }
+    for (const account of cfg.accounts) void this.stateStore.set(account.id, { requests: 0, tokens: 0, failures: 0, health: account.enabled === false ? 'disabled' : 'healthy' });
   }
 
   async generate(task: TaskType, prompt: string, options: GenerateRequest['options'] = {}): Promise<GenerateResult> {
@@ -70,20 +54,19 @@ export class LLMGateway {
     if (!candidates.length) throw new GatewayError('ProviderUnavailableError', 'No eligible provider/account/model is available');
     const requestId = randomUUID();
     let lastError: GatewayError | undefined;
-
     for (const candidate of candidates) {
       for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
         try {
+          const credential = await this.credentialStore.get(candidate.account.credentialRef);
           const reserved = await this.stateStore.reserve(candidate.account.id, this.estimatedTokens(request), candidate.account.limits ?? {});
           if (!reserved) {
             lastError = new GatewayError('RateLimitError', `Account ${candidate.account.id} quota is exhausted`, true);
             await this.markFailure(candidate.account.id, lastError);
-            continue;
+            break;
           }
-          const credential = await this.credentialStore.get(candidate.account.credentialRef);
           const started = Date.now();
           const result = await candidate.adapter.generate(candidate.account, request, candidate.model, credential, requestId);
-          await this.markSuccess(candidate.account.id, result.usage.totalTokens ?? 0);
+          await this.markSuccess(candidate.account.id, result.usage.totalTokens ?? 0, Date.now() - started);
           await this.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: result.model, latencyMs: Date.now() - started, success: true, usage: result.usage });
           return result;
         } catch (error) {
@@ -106,11 +89,11 @@ export class LLMGateway {
       const candidates = await self.selectCandidates(request);
       const candidate = candidates[0];
       if (!candidate) throw new GatewayError('ProviderUnavailableError', 'No eligible provider/account/model is available');
-      const requestId = randomUUID();
       const credential = await self.credentialStore.get(candidate.account.credentialRef);
+      const reserved = await self.stateStore.reserve(candidate.account.id, self.estimatedTokens(request), candidate.account.limits ?? {});
+      if (!reserved) throw new GatewayError('RateLimitError', `Account ${candidate.account.id} quota is exhausted`, true);
+      const requestId = randomUUID();
       try {
-        const reserved = await self.stateStore.reserve(candidate.account.id, self.estimatedTokens(request), candidate.account.limits ?? {});
-        if (!reserved) throw new GatewayError('RateLimitError', `Account ${candidate.account.id} quota is exhausted`, true);
         for await (const chunk of candidate.adapter.stream(candidate.account, request, candidate.model, credential, requestId)) yield chunk;
         await self.markSuccess(candidate.account.id, 0);
       } catch (error) {
@@ -132,14 +115,12 @@ export class LLMGateway {
         if (!state) { state = { requests: 0, tokens: 0, failures: 0, health: 'healthy' }; await this.stateStore.set(account.id, state); }
         if (state.health === 'disabled' || (state.cooldownUntil ?? 0) > Date.now()) continue;
         if (!required.every((capability) => account.capabilities.includes(capability))) continue;
-        const models = request.options?.model ? account.models.filter((model) => model === request.options?.model) : account.models;
+        const models = request.options?.model ? account.models.filter((model) => model === request.options.model) : account.models;
         if (!models.length) continue;
         let credential: string;
-        try { credential = await this.credentialStore.get(account.credentialRef); }
-        catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
+        try { credential = await this.credentialStore.get(account.credentialRef); } catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
         let discovered: ModelInfo[];
-        try { discovered = await this.modelRegistry.discover(account, adapter, credential); }
-        catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
+        try { discovered = await this.modelRegistry.discover(account, adapter, credential); } catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
         for (const model of discovered) {
           if (!models.includes(model.id) || model.available === false) continue;
           if (!required.every((capability) => model.capabilities.includes(capability))) continue;
@@ -171,14 +152,15 @@ export class LLMGateway {
   }
 
   private estimatedTokens(request: GenerateRequest): number {
-    return Math.max(0, request.options?.maxTokens ?? 0);
+    const input = request.messages?.reduce((sum, message) => sum + Math.ceil(message.content.length / 4), 0) ?? Math.ceil(request.prompt.length / 4);
+    return input + Math.max(0, request.options?.maxTokens ?? 0);
   }
 
-  private async markSuccess(id: string, tokens: number): Promise<void> {
+  private async markSuccess(id: string, tokens: number, latencyMs?: number): Promise<void> {
     await this.stateStore.update(id, (current) => {
       const state = current ?? { requests: 0, tokens: 0, failures: 0, health: 'healthy' as const };
       const now = Date.now();
-      return { ...state, requests: state.requests, tokens: state.tokens + tokens, lastUsedAt: now, lastSuccessAt: now, failures: 0, cooldownUntil: undefined, health: 'healthy' };
+      return { ...state, tokens: state.tokens + tokens, lastUsedAt: now, lastSuccessAt: now, failures: 0, cooldownUntil: undefined, health: 'healthy', metadata: { ...state.metadata, ...(latencyMs !== undefined ? { latencyMs } : {}) } };
     });
   }
 
