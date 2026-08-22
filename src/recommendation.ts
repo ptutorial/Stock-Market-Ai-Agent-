@@ -20,16 +20,16 @@ export class RecommendationEngine {
     const draftResult = await this.options.runtime.run(recommendationAgent, synthesisContext);
     const critiqueResult = await this.options.runtime.run(criticAgent, { ...synthesisContext, evidence: { ...synthesisContext.evidence, draft: draftResult.output } });
     const finalResult = await this.options.runtime.run(finalAgent, { ...synthesisContext, evidence: { ...synthesisContext.evidence, draft: draftResult.output, critique: critiqueResult.output } });
-    return normalizeRecommendation(finalResult.structured, { symbol: input.symbol, exchange: input.exchange, horizon: context.horizon, requestId, conclusions, draft: draftResult.output, critique: critiqueResult.output });
+    return normalizeRecommendation(finalResult.structured, { symbol: input.symbol, exchange: input.exchange ?? '', horizon: context.horizon, requestId, conclusions, draft: draftResult.output, critique: critiqueResult.output });
   }
 }
 
-function normalizeRecommendation(structured: Record<string, unknown> | undefined, context: { symbol: string; exchange?: string; horizon: string; requestId: string; conclusions: Record<string, string>; draft: string; critique: string }): Recommendation {
+function normalizeRecommendation(structured: Record<string, unknown> | undefined, context: { symbol: string; exchange: string; horizon: string; requestId: string; conclusions: Record<string, string>; draft: string; critique: string }): Recommendation {
   const action = String(structured?.recommendation ?? 'HOLD').toUpperCase();
   const recommendationAction: RecommendationAction = action === 'BUY' || action === 'AVOID' ? action : 'HOLD';
   const rawConfidence = Number(structured?.confidence ?? 0); const confidence = Number.isFinite(rawConfidence) ? Math.min(1, Math.max(0, rawConfidence)) : 0;
   const scores: Record<string, number> = {};
   if (structured?.scores && typeof structured.scores === 'object' && !Array.isArray(structured.scores)) for (const [key, value] of Object.entries(structured.scores)) { const score = Number(value); if (Number.isFinite(score)) scores[key] = Math.min(100, Math.max(0, score)); }
   const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-  return { symbol: context.symbol, ...(context.exchange === undefined ? {} : { exchange: context.exchange }), horizon: context.horizon, recommendation: recommendationAction, confidence, scores, evidence: list(structured?.evidence), risks: list(structured?.risks), agentConclusions: context.conclusions, draft: context.draft, critique: context.critique, requestId: context.requestId };
+  return { symbol: context.symbol, ...(context.exchange ? { exchange: context.exchange } : {}), horizon: context.horizon, recommendation: recommendationAction, confidence, scores, evidence: list(structured?.evidence), risks: list(structured?.risks), agentConclusions: context.conclusions, draft: context.draft, critique: context.critique, requestId: context.requestId };
 }
