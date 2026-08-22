@@ -1,6 +1,6 @@
 # Gateway Configuration
 
-Phase 2 introduces externalized gateway configuration and credential references.
+Phase 2 introduces externalized gateway configuration and credential references. Phase 3 provider adapters consume the same provider-neutral configuration.
 
 ## Credentials
 
@@ -29,6 +29,13 @@ Each account defines:
 - Enabled/disabled state.
 - Optional RPM/RPD/TPM/TPD limits.
 - Optional cost metadata.
+- Optional provider metadata.
+
+Cloudflare Workers AI requires the Cloudflare account ID separately from the API token. Configure it as `metadata.accountId`; keep the API token in `credentialRef`.
+
+## Provider adapter behavior
+
+The adapters use a shared HTTP transport with bounded request timeouts and normalized provider errors. OpenAI-compatible providers use the common SSE parser for streaming. Provider-specific model capability refinement is handled by Phase 4.
 
 ## Validation
 
