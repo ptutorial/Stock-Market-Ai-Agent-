@@ -49,7 +49,17 @@ export interface AccountConfig {
   metadata?: Record<string, string>;
 }
 export type AccountHealth = 'healthy' | 'degraded' | 'rate_limited' | 'authentication_failure' | 'temporarily_unavailable' | 'disabled';
-export interface AccountState { requests: number; tokens: number; lastUsedAt?: number; lastSuccessAt?: number; lastFailureAt?: number; failures: number; cooldownUntil?: number; health: AccountHealth; }
+export interface AccountState {
+  requests: number;
+  tokens: number;
+  lastUsedAt?: number;
+  lastSuccessAt?: number;
+  lastFailureAt?: number;
+  failures: number;
+  cooldownUntil?: number;
+  health: AccountHealth;
+  metadata?: Record<string, unknown>;
+}
 
 export interface ProviderAdapter {
   readonly name: ProviderName;
