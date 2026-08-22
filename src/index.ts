@@ -1,5 +1,4 @@
 export * from './domain.js';
-export * from './types.js';
 export * from './errors.js';
 export * from './config.js';
 export * from './gateway.js';
@@ -21,10 +20,5 @@ export function createGateway(
 }
 
 export function createDefaultAdapters() {
-  return [
-    new GeminiAdapter(),
-    new GroqAdapter(),
-    new OpenRouterAdapter(),
-    new CloudflareWorkersAIAdapter(),
-  ];
+  return [new GeminiAdapter(), new GroqAdapter(), new OpenRouterAdapter(), new CloudflareWorkersAIAdapter()];
 }
