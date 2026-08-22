@@ -11,33 +11,33 @@ This document is the phased implementation roadmap for the multi-provider cloud 
 # Phase 2 — Configuration & Credential Management
 **Status:** Complete
 # Phase 3 — Provider Adapter SDK
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 4 — Model & Capability Discovery
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 5 — Account Selection & Routing Engine
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 6 — Rate-Limit & Quota Management
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 7 — Retry, Failure Classification & Fallback
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 8 — Concurrency & Distributed State
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 9 — Usage, Cost & Accounting
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 10 — Health Monitoring
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 11 — Observability
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 12 — Security Hardening
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 13 — Comprehensive Testing
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 14 — Developer API & SDK
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 15 — Service/API Layer
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 # Phase 16 — Redis & Production Scaling
-**Status:** Implemented — CI verification pending
+**Status:** Implemented
 
 # Phase 17 — Additional Providers
 **Status:** Future
@@ -47,58 +47,53 @@ This document is the phased implementation roadmap for the multi-provider cloud 
 
 ## Phase 18 Hardening — Batch 1 of 3
 
-### Completed in this batch
+**Status: Complete**
 
-1. **Production runtime wiring** — `src/server.ts` now loads `LLM_GATEWAY_CONFIG`, flattens enabled accounts, registers all implemented adapters, resolves credentials from environment variables, and fails startup if configured providers have no adapter.
-2. **Gateway quota enforcement** — `LLMGateway` now uses the configured `StateStore.reserve()` before provider execution instead of leaving quota state disconnected from request execution.
-3. **Redis integration** — `REDIS_URL` now selects `AtomicRedisStateStore` for the production runtime. Redis quota reservation also persists account request/token state atomically.
-4. **Model discovery cache** — `LLMGateway` now uses `ModelRegistry`, preventing provider model discovery on every request and allowing TTL-based refresh.
-5. **Credential failure isolation** — credential lookup/discovery failures are handled per candidate and do not consume quota before provider execution.
-6. **Multi-account verification** — tests cover two-account independent RPM quotas and model-discovery caching. `.env.example` now contains a complete two-Gemini-account configuration example.
+1. Production runtime wiring.
+2. Gateway quota enforcement.
+3. Redis integration.
+4. Model discovery cache.
+5. Credential failure isolation.
+6. Multi-account verification.
 
-### Runtime configuration
+## Phase 18 Hardening — Batch 2 of 3
 
-The production server now follows:
+**Status: Complete**
 
-```text
-.env
-  ↓
-LLM_GATEWAY_CONFIG
-  ↓
-AccountConfig[]
-  ↓
-CredentialStore
-  ↓
-ProviderAdapters
-  ↓
-StateStore
-  ├── Redis when REDIS_URL is set
-  └── InMemory otherwise
-  ↓
-GatewayClient / HTTP API
-```
+7. Correct round-robin routing.
+8. Latency-based fastest routing.
+9. Normalized utilization routing.
+10. Pre-first-byte streaming fallback semantics.
+11. `/health` and `/ready` endpoints.
+12. Scheduled provider health checks and graceful shutdown.
 
-### Remaining Phase 18 hardening batches
+## Phase 18 Hardening — Batch 3 of 3
 
-**Batch 2 — Routing, health and distributed correctness**
+**Status: Implemented — CI verification pending**
 
-- Fix round-robin cursor advancement.
-- Implement real latency-based `fastest` routing.
-- Improve utilization scoring and window semantics.
-- Add scheduled health checks/recovery.
-- Make Redis account-state updates atomic.
-- Add distributed health/cooldown state where appropriate.
+13. **Concurrency-safe Redis state updates** — Redis account-state mutations now use a short-lived distributed lock with token-safe release instead of an unsafe GET/SET race.
+14. **Normalized cost accounting** — gateway results now calculate estimated cost from actual input/output usage using model-level pricing first and account-level pricing as fallback.
+15. **HTTP error hardening** — public HTTP responses expose stable gateway error categories while provider/internal messages remain hidden except for client-side invalid-request errors.
+16. **Provider error normalization** — provider HTTP handling maps authentication, rate-limit, model, server, and request failures into the common `GatewayError` taxonomy with `Retry-After` support.
+17. **Model capability correctness** — Gemini discovery no longer blindly assigns every account capability to every model. Configured model capabilities are treated as an explicit allow-list, and model metadata is used for generation-method validation.
+18. **Message-role normalization** — Gemini now maps system messages to `systemInstruction`, assistant messages to `model`, user messages to `user`, and rejects unsupported tool-result messages instead of silently misrepresenting them.
 
-**Batch 3 — Streaming, HTTP, deployment and verification**
+## Remaining production certification work
 
-- Harden streaming reliability and usage accounting.
-- Add `/health` and `/ready` endpoints.
-- Complete graceful shutdown semantics.
-- Complete live Redis/provider integration tests.
-- Add Docker vulnerability scanning, load/concurrency testing and secret-history scanning.
-- Run production deployment smoke tests.
+Phase 18 is **not production-certified** yet. The next work is verification rather than another feature phase:
 
-### Important status rule
+- Run full TypeScript build and test suite.
+- Run Docker Compose integration test with Redis.
+- Run two-account Gemini integration test with real credentials supplied only through environment/secret configuration.
+- Run concurrent quota contention tests against Redis.
+- Run streaming failure/recovery tests.
+- Run Docker vulnerability scanning.
+- Run load/concurrency tests.
+- Run secret-history scanning.
+- Run deployment smoke test.
+- Confirm CI is green for the final hardening commits.
+
+## Important status rule
 
 The repository must not be described as production-certified until the remaining live integration, deployment, security and load checks have passed. A green TypeScript/unit-test CI run is necessary but not sufficient.
 
@@ -122,22 +117,22 @@ The repository must not be described as production-certified until the remaining
 Phase 0  Foundation                         [DONE]
 Phase 1  Core contracts                     [DONE]
 Phase 2  Configuration / credentials        [DONE]
-Phase 3  Provider adapter SDK               [IMPLEMENTED]
-Phase 4  Model / capability discovery       [IMPLEMENTED]
-Phase 5  Routing engine                     [IMPLEMENTED]
-Phase 6  Rate limits / quotas               [IMPLEMENTED]
-Phase 7  Retry / fallback                   [IMPLEMENTED]
-Phase 8  Concurrency / distributed state    [IMPLEMENTED]
-Phase 9  Usage / cost                       [IMPLEMENTED]
-Phase 10 Health monitoring                  [IMPLEMENTED]
-Phase 11 Observability                     [IMPLEMENTED]
-Phase 12 Security hardening                [IMPLEMENTED]
-Phase 13 Comprehensive testing             [IMPLEMENTED]
-Phase 14 Developer API / SDK               [IMPLEMENTED]
-Phase 15 Service/API layer                 [IMPLEMENTED]
-Phase 16 Redis / production scaling        [IMPLEMENTED]
-Phase 17 Additional providers
-Phase 18 Production readiness              [HARDENING IN PROGRESS]
+Phase 3  Provider adapter SDK               [DONE]
+Phase 4  Model / capability discovery       [DONE]
+Phase 5  Routing engine                     [DONE]
+Phase 6  Rate limits / quotas               [DONE]
+Phase 7  Retry / fallback                   [DONE]
+Phase 8  Concurrency / distributed state    [DONE]
+Phase 9  Usage / cost                       [DONE]
+Phase 10 Health monitoring                  [DONE]
+Phase 11 Observability                     [DONE]
+Phase 12 Security hardening                [DONE]
+Phase 13 Comprehensive testing             [DONE]
+Phase 14 Developer API / SDK               [DONE]
+Phase 15 Service/API layer                 [DONE]
+Phase 16 Redis / production scaling        [DONE]
+Phase 17 Additional providers              [FUTURE]
+Phase 18 Production readiness              [HARDENING / VERIFICATION]
 ```
 
 # Definition of Done for Every Phase
