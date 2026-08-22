@@ -77,49 +77,13 @@ export class LocalDBDataSource implements MarketDataSource {
     this.freshnessSeconds = options.freshnessSeconds ?? {};
   }
 
-  async quote(symbol: string, exchange?: string) {
-    const now = this.clock();
-    const data = await this.options.executor.quote(symbol, exchange);
-    return result(this.name, data, observedAtFrom(data), now, this.freshnessSeconds.quote);
-  }
-
-  async history(symbol: string, timeframe: string, limit?: number, exchange?: string) {
-    const now = this.clock();
-    const data = await this.options.executor.history(symbol, timeframe, limit, exchange);
-    const observedAt = data && data.length ? data[data.length - 1]?.timestamp : undefined;
-    return result(this.name, data, observedAt, now, this.freshnessSeconds.history);
-  }
-
-  async technicals(symbol: string, timeframe?: string, exchange?: string) {
-    const now = this.clock();
-    const data = await this.options.executor.technicals(symbol, timeframe, exchange);
-    return result(this.name, data, observedAtFrom(data), now, this.freshnessSeconds.technicals);
-  }
-
-  async fundamentals(symbol: string, exchange?: string) {
-    const now = this.clock();
-    const data = await this.options.executor.fundamentals(symbol, exchange);
-    return result(this.name, data, observedAtFrom(data), now, this.freshnessSeconds.fundamentals);
-  }
-
-  async news(symbol: string, limit?: number) {
-    const now = this.clock();
-    const data = await this.options.executor.news(symbol, limit);
-    const observedAt = data && data.length ? data[0]?.publishedAt : undefined;
-    return result(this.name, data, observedAt, now, this.freshnessSeconds.news);
-  }
-
-  async sectorStrength(symbol: string, exchange?: string) {
-    const now = this.clock();
-    const data = await this.options.executor.sectorStrength(symbol, exchange);
-    return result(this.name, data, observedAtFrom(data), now, this.freshnessSeconds.sectorStrength);
-  }
-
-  async risk(symbol: string, exchange?: string) {
-    const now = this.clock();
-    const data = await this.options.executor.risk(symbol, exchange);
-    return result(this.name, data, observedAtFrom(data), now, this.freshnessSeconds.risk);
-  }
+  async quote(symbol: string, exchange?: string) { const now = this.clock(); const data = await this.options.executor.quote(symbol, exchange); return result(this.name, data, observedAtFrom(data), now, this.freshnessSeconds.quote); }
+  async history(symbol: string, timeframe: string, limit?: number, exchange?: string) { const now = this.clock(); const data = await this.options.executor.history(symbol, timeframe, limit, exchange); const observedAt = data?.length ? data[data.length - 1]?.timestamp : undefined; return result(this.name, data, observedAt, now, this.freshnessSeconds.history); }
+  async technicals(symbol: string, timeframe?: string, exchange?: string) { const now = this.clock(); const data = await this.options.executor.technicals(symbol, timeframe, exchange); return result(this.name, data, observedAtFrom(data), now, this.freshnessSeconds.technicals); }
+  async fundamentals(symbol: string, exchange?: string) { const now = this.clock(); const data = await this.options.executor.fundamentals(symbol, exchange); return result(this.name, data, observedAtFrom(data), now, this.freshnessSeconds.fundamentals); }
+  async news(symbol: string, limit?: number) { const now = this.clock(); const data = await this.options.executor.news(symbol, limit); const observedAt = data?.length ? data[0]?.publishedAt : undefined; return result(this.name, data, observedAt, now, this.freshnessSeconds.news); }
+  async sectorStrength(symbol: string, exchange?: string) { const now = this.clock(); const data = await this.options.executor.sectorStrength(symbol, exchange); return result(this.name, data, observedAtFrom(data), now, this.freshnessSeconds.sectorStrength); }
+  async risk(symbol: string, exchange?: string) { const now = this.clock(); const data = await this.options.executor.risk(symbol, exchange); return result(this.name, data, observedAtFrom(data), now, this.freshnessSeconds.risk); }
 }
 
 export interface DataSourceRouterOptions {
@@ -142,42 +106,40 @@ export class DataSourceRouter implements MarketDataProvider {
   constructor(options: DataSourceRouterOptions) {
     if (!options.sources.length) throw new Error('At least one data source is required');
     const byName = new Map(options.sources.map((source) => [source.name, source]));
-    const ordered = (options.priority ?? options.sources.map((source) => source.name))
-      .map((name) => byName.get(name))
-      .filter((source): source is MarketDataSource => Boolean(source));
+    const ordered = (options.priority ?? options.sources.map((source) => source.name)).map((name) => byName.get(name)).filter((source): source is MarketDataSource => Boolean(source));
     this.sources = [...ordered, ...options.sources.filter((source) => !ordered.includes(source))];
     this.fallbackOn = new Set(options.fallbackOn ?? ['missing', 'stale']);
     this.onFallback = options.onFallback;
   }
 
-  private async route<T>(method: string, symbol: string, call: (source: MarketDataSource) => Promise<DataSourceResult<T>>): Promise<RoutedData<T>> {
+  private async route<T>(method: string, symbol: string, call: (source: MarketDataSource) => Promise<DataSourceResult<T>>): Promise<T> {
     let previous: DataSourceName | undefined;
     let lastStatus: FreshnessStatus = 'missing';
+    let lastError: unknown;
     for (const source of this.sources) {
-      const response = await call(source);
-      if (response.data !== null && !this.fallbackOn.has(response.metadata.freshness)) {
-        return { data: response.data, metadata: response.metadata };
+      try {
+        const response = await call(source);
+        const usable = response.data !== null && !this.fallbackOn.has(response.metadata.freshness);
+        if (usable) return response.data;
+        if (response.data !== null && response.metadata.freshness === 'unknown' && !this.fallbackOn.has('unknown')) return response.data;
+        if (previous && previous !== source.name) this.onFallback?.({ method, symbol, from: previous, to: source.name, reason: lastStatus });
+        previous = source.name;
+        lastStatus = response.metadata.freshness;
+      } catch (error) {
+        lastError = error;
+        if (previous && previous !== source.name) this.onFallback?.({ method, symbol, from: previous, to: source.name, reason: lastStatus });
+        previous = source.name;
+        lastStatus = 'missing';
       }
-      if (response.data !== null && response.metadata.freshness === 'unknown' && !this.fallbackOn.has('unknown')) {
-        return { data: response.data, metadata: response.metadata };
-      }
-      if (response.data !== null && !this.fallbackOn.has(response.metadata.freshness)) {
-        return { data: response.data, metadata: response.metadata };
-      }
-      if (previous && previous !== source.name) {
-        this.onFallback?.({ method, symbol, from: previous, to: source.name, reason: lastStatus });
-      }
-      previous = source.name;
-      lastStatus = response.metadata.freshness;
     }
-    throw new Error(`No usable ${method} data source available for ${symbol}`);
+    throw lastError instanceof Error ? lastError : new Error(`No usable ${method} data source available for ${symbol}`);
   }
 
-  quote(symbol: string, exchange?: string) { return this.route('quote', symbol, (s) => s.quote(symbol, exchange)); }
-  history(symbol: string, timeframe: string, limit?: number, exchange?: string) { return this.route('history', symbol, (s) => s.history(symbol, timeframe, limit, exchange)); }
-  technicals(symbol: string, timeframe?: string, exchange?: string) { return this.route('technicals', symbol, (s) => s.technicals(symbol, timeframe, exchange)); }
-  fundamentals(symbol: string, exchange?: string) { return this.route('fundamentals', symbol, (s) => s.fundamentals(symbol, exchange)); }
-  news(symbol: string, limit?: number) { return this.route('news', symbol, (s) => s.news(symbol, limit)); }
-  sectorStrength(symbol: string, exchange?: string) { return this.route('sectorStrength', symbol, (s) => s.sectorStrength(symbol, exchange)); }
-  risk(symbol: string, exchange?: string) { return this.route('risk', symbol, (s) => s.risk(symbol, exchange)); }
+  quote(symbol: string, exchange?: string): Promise<MarketQuote> { return this.route('quote', symbol, (s) => s.quote(symbol, exchange)); }
+  history(symbol: string, timeframe: string, limit?: number, exchange?: string): Promise<OHLCVBar[]> { return this.route('history', symbol, (s) => s.history(symbol, timeframe, limit, exchange)); }
+  technicals(symbol: string, timeframe?: string, exchange?: string): Promise<TechnicalIndicators> { return this.route('technicals', symbol, (s) => s.technicals(symbol, timeframe, exchange)); }
+  fundamentals(symbol: string, exchange?: string): Promise<FundamentalSnapshot> { return this.route('fundamentals', symbol, (s) => s.fundamentals(symbol, exchange)); }
+  news(symbol: string, limit?: number): Promise<MarketNewsItem[]> { return this.route('news', symbol, (s) => s.news(symbol, limit)); }
+  sectorStrength(symbol: string, exchange?: string): Promise<SectorStrength> { return this.route('sectorStrength', symbol, (s) => s.sectorStrength(symbol, exchange)); }
+  risk(symbol: string, exchange?: string): Promise<RiskMetrics> { return this.route('risk', symbol, (s) => s.risk(symbol, exchange)); }
 }
