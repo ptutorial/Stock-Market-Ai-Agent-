@@ -5,23 +5,18 @@ import { ModelRegistry } from '../dist/model-registry.js';
 import { InMemoryStateStore } from '../dist/state.js';
 
 class FakeAdapter {
-  name = 'groq';
-  calls = [];
-  discoveries = 0;
+  constructor(name = 'groq') { this.name = name; this.calls = []; this.discoveries = 0; }
   async generate(account, request, model, credential, requestId) {
     this.calls.push({ account: account.id, credential, model: model.id });
     if (credential === 'bad') throw new Error('503 provider unavailable');
     return { text: 'ok', provider: this.name, accountId: account.id, model: model.id, usage: { totalTokens: 3 }, requestId, latencyMs: 1 };
   }
   async *stream() { yield { text: 'ok', done: true }; }
-  async discoverModels(account) {
-    this.discoveries += 1;
-    return [{ id: 'test-model', provider: this.name, capabilities: account.capabilities, available: true }];
-  }
+  async discoverModels(account) { this.discoveries += 1; return [{ id: 'test-model', provider: this.name, capabilities: account.capabilities, available: true }]; }
   async healthCheck() { return true; }
 }
 
-const account = (id, credentialRef, priority, limits) => ({ id, provider: 'groq', credentialRef, models: ['test-model'], capabilities: ['chat'], priority, limits });
+const account = (id, credentialRef, priority, limits, provider = 'groq') => ({ id, provider, credentialRef, models: ['test-model'], capabilities: ['chat'], priority, limits });
 class FakeCredentials {
   constructor(values) { this.values = values; }
   async get(ref) { const value = this.values[ref]; if (!value) throw new Error(`missing ${ref}`); return value; }
@@ -67,4 +62,22 @@ test('credential failure does not consume the account quota', async () => {
   await assert.rejects(() => gateway.generate('general', 'hello'));
   const state = await stateStore.get('a1');
   assert.equal(state?.requests, 0);
+});
+
+test('supports two independent Gemini accounts with deterministic provider ordering', async () => {
+  const adapter = new FakeAdapter('gemini');
+  const stateStore = new InMemoryStateStore();
+  const gateway = new LLMGateway({
+    adapters: [adapter],
+    providerOrder: ['gemini'],
+    strategy: 'priority',
+    maxRetries: 0,
+    accounts: [account('gemini-primary', 'G1', 10, { rpm: 1 }, 'gemini'), account('gemini-secondary', 'G2', 1, { rpm: 1 }, 'gemini')],
+    stateStore,
+  }, new FakeCredentials({ G1: 'good-primary', G2: 'good-secondary' }));
+  const first = await gateway.generate('general', 'hello');
+  const second = await gateway.generate('general', 'hello');
+  assert.equal(first.accountId, 'gemini-primary');
+  assert.equal(second.accountId, 'gemini-secondary');
+  assert.deepEqual(adapter.calls.map((call) => call.account), ['gemini-primary', 'gemini-secondary']);
 });
