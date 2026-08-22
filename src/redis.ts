@@ -3,7 +3,7 @@ import type { AccountState } from './domain.js';
 import type { QuotaUsage, StateStore, RedisLikeClient } from './state.js';
 
 export interface RedisAtomicClient extends RedisLikeClient {
-  eval(script: string, numKeys: number, ...args: string[]): Promise<unknown>;
+  eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown>;
 }
 
 export class AtomicRedisStateStore implements StateStore {
@@ -35,7 +35,7 @@ export class AtomicRedisStateStore implements StateStore {
       await this.set(accountId, next);
       return next;
     } finally {
-      await this.redis.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end", 1, lockKey, token);
+      await this.redis.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end", { keys: [lockKey], arguments: [token] });
     }
   }
 
@@ -67,7 +67,7 @@ redis.call('EXPIRE', KEYS[2], 61)
 redis.call('EXPIRE', KEYS[3], 86401)
 redis.call('EXPIRE', KEYS[4], 86401)
 return 1`;
-    const value = await this.redis.eval(script, keys.length, ...keys, String(limits.rpm ?? -1), String(limits.rpd ?? -1), String(limits.tpm ?? -1), String(limits.tpd ?? -1), String(Math.max(0, Math.floor(tokens))), String(now));
+    const value = await this.redis.eval(script, { keys, arguments: [String(limits.rpm ?? -1), String(limits.rpd ?? -1), String(limits.tpm ?? -1), String(limits.tpd ?? -1), String(Math.max(0, Math.floor(tokens)))] });
     return Number(value) === 1;
   }
 
