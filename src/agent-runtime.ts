@@ -1,19 +1,30 @@
 import { randomUUID } from 'node:crypto';
-import type { GenerateResult, ToolCall } from './domain.js';
+import type { ToolCall } from './domain.js';
 import type { LLMGateway } from './gateway.js';
 import type { AgentContext, AgentDefinition, AgentResult } from './agents.js';
 import { ToolRegistry } from './tools.js';
+import { DEFAULT_AGENT_MODEL_POLICIES, LLMGatewayAgentAdapter } from './agent-llm.js';
+import type { AgentLLMGateway, AgentModelPolicy } from './agent-llm.js';
 
 export interface AgentRuntimeOptions {
-  gateway: LLMGateway;
   tools: ToolRegistry;
+  agentLLM?: AgentLLMGateway;
+  gateway?: LLMGateway;
+  policies?: Partial<Record<AgentModelPolicy['name'] | AgentDefinition['role'], AgentModelPolicy>>;
   maxRounds?: number;
 }
 
 export class AgentRuntime {
   private readonly maxRounds: number;
+  private readonly llm: AgentLLMGateway;
+  private readonly policies: Record<string, AgentModelPolicy>;
+
   constructor(private readonly options: AgentRuntimeOptions) {
     this.maxRounds = options.maxRounds ?? 4;
+    if (options.agentLLM) this.llm = options.agentLLM;
+    else if (options.gateway) this.llm = new LLMGatewayAgentAdapter(options.gateway);
+    else throw new Error('AgentRuntime requires agentLLM or gateway');
+    this.policies = { ...DEFAULT_AGENT_MODEL_POLICIES, ...(options.policies ?? {}) };
   }
 
   async run(agent: AgentDefinition, context: AgentContext): Promise<AgentResult> {
@@ -22,15 +33,29 @@ export class AgentRuntime {
     const toolCalls: ToolCall[] = [];
     const toolResults: AgentResult['toolResults'] = [];
     let prompt = this.buildPrompt(agent, context, toolResults);
-    let response: GenerateResult | undefined;
+    let output = '';
+    let structured: Record<string, unknown> | undefined;
 
     for (let round = 0; round < Math.min(this.maxRounds, agent.maxToolRounds ?? this.maxRounds); round += 1) {
-      response = await this.options.gateway.generate(agent.task, prompt, {
-        capabilities: agent.toolNames.length ? ['chat', 'tool_calling'] : ['chat'],
+      const policy = this.policies[agent.role];
+      if (!policy) throw new Error(`No LLM model policy configured for agent role ${agent.role}`);
+
+      const response = await this.llm.generate({
+        requestId,
+        agentId: agent.id,
+        role: agent.role,
+        task: agent.task,
+        systemPrompt: agent.systemPrompt,
+        input: prompt,
+        policy,
+        capabilities: agent.task === 'structured_output'
+          ? ['chat', 'structured_output', ...(agent.toolNames.length ? ['tool_calling' as const] : [])]
+          : agent.toolNames.length ? ['chat', 'tool_calling'] : ['chat'],
         tools: this.options.tools.definitions(agent.toolNames),
-        maxTokens: 2000,
       });
 
+      output = response.output;
+      structured = parseStructuredOutput(output);
       const calls = response.toolCalls ?? [];
       toolCalls.push(...calls);
       if (!calls.length) break;
@@ -39,23 +64,22 @@ export class AgentRuntime {
         if (!allowedTools.has(call.name)) {
           throw new Error(`Agent ${agent.id} is not permitted to use tool ${call.name}`);
         }
-        const output = await this.options.tools.execute(call.name, call.arguments, {
+        const toolOutput = await this.options.tools.execute(call.name, call.arguments, {
           requestId,
           agentId: agent.id,
         });
-        toolResults.push({ tool: call.name, input: call.arguments, output });
+        toolResults.push({ tool: call.name, input: call.arguments, output: toolOutput });
       }
-      prompt = this.buildPrompt(agent, context, toolResults, response.text);
+      prompt = this.buildPrompt(agent, context, toolResults, output);
     }
 
-    if (!response) throw new Error(`Agent ${agent.id} produced no response`);
     return {
       agentId: agent.id,
       role: agent.role,
-      output: response.text,
+      output,
       toolCalls,
       toolResults,
-      structured: parseStructuredOutput(response.text),
+      structured,
     };
   }
 
