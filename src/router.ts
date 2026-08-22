@@ -22,23 +22,27 @@ export class ModelRouter {
   }
 
   select(candidates: RoutingCandidate[], request: RoutingRequest = {}): RoutingCandidate {
-    const eligible = candidates.filter((candidate) => this.isEligible(candidate, request));
-    if (eligible.length === 0) throw new Error('No eligible routing candidate');
-
-    const ranked = eligible.map((candidate) => ({ ...candidate, score: this.score(candidate) }));
-    if (this.strategy === 'round_robin') return ranked[this.roundRobinCursor++ % ranked.length];
-    return ranked.sort((a, b) => b.score - a.score)[0];
+    const ranked = this.rank(candidates, request);
+    if (!ranked.length) throw new Error('No eligible routing candidate');
+    return ranked[0];
   }
 
   rank(candidates: RoutingCandidate[], request: RoutingRequest = {}): RoutingCandidate[] {
     const eligible = candidates.filter((candidate) => this.isEligible(candidate, request));
-    return eligible.map((candidate) => ({ ...candidate, score: this.score(candidate) }))
+    if (this.strategy === 'round_robin') {
+      if (!eligible.length) return [];
+      const offset = this.roundRobinCursor++ % eligible.length;
+      const rotated = [...eligible.slice(offset), ...eligible.slice(0, offset)];
+      return rotated.map((candidate, index) => ({ ...candidate, score: -index }));
+    }
+    return eligible
+      .map((candidate) => ({ ...candidate, score: this.score(candidate) }))
       .sort((a, b) => b.score - a.score);
   }
 
   private isEligible(candidate: RoutingCandidate, request: RoutingRequest): boolean {
     const { account, state, model } = candidate;
-    if (account.enabled === false || state.health === 'disabled') return false;
+    if (account.enabled === false || state.health === 'disabled' || state.health === 'authentication_failure') return false;
     if (state.cooldownUntil && state.cooldownUntil > this.clock()) return false;
     if (model.available === false) return false;
     if (request.model && model.id !== request.model) return false;
@@ -58,13 +62,21 @@ export class ModelRouter {
     const { account, state, model } = candidate;
     const priority = account.priority ?? 0;
     const failures = state.failures * 25;
-    const utilizationPenalty = state.requests > 0 ? Math.min(state.requests, 1000) / 10 : 0;
-    const latency = typeof candidate.score === 'number' ? candidate.score : 0;
-    if (this.strategy === 'cheapest') return -(model.inputCostPerMillion ?? account.costPerMillionInput ?? 0) - (model.outputCostPerMillion ?? account.costPerMillionOutput ?? 0) + priority / 100;
-    if (this.strategy === 'lowest_utilization') return priority - utilizationPenalty - failures;
-    if (this.strategy === 'fastest') return priority - latency - failures;
-    if (this.strategy === 'least_recently_used') return priority + (state.lastUsedAt ? -(state.lastUsedAt / 1_000_000_000) : 0) - failures;
-    return priority - failures - utilizationPenalty;
+    const rpm = account.limits?.rpm;
+    const tpm = account.limits?.tpm;
+    const requestUtil = rpm ? Math.min(1, state.requests / rpm) : 0;
+    const tokenUtil = tpm ? Math.min(1, state.tokens / tpm) : 0;
+    const utilizationPenalty = (requestUtil * 0.4 + tokenUtil * 0.6) * 100;
+    const latency = Number(state.metadata?.latencyMs ?? Number.MAX_SAFE_INTEGER);
+    const inputCost = model.inputCostPerMillion ?? account.costPerMillionInput ?? 0;
+    const outputCost = model.outputCostPerMillion ?? account.costPerMillionOutput ?? 0;
+    switch (this.strategy) {
+      case 'cheapest': return -(inputCost + outputCost) + priority / 100;
+      case 'lowest_utilization': return priority - utilizationPenalty - failures;
+      case 'fastest': return priority - latency - failures;
+      case 'least_recently_used': return priority - (state.lastUsedAt ?? 0) / 1_000_000 - failures;
+      default: return priority - failures;
+    }
   }
 }
 
