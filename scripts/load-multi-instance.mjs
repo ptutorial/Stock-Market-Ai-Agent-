@@ -1,0 +1,16 @@
+import { createClient } from 'redis';
+import { AtomicRedisStateStore } from '../dist/redis.js';
+const url = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
+const instances = Number(process.env.MULTI_INSTANCE_COUNT ?? 2);
+const perInstance = Number(process.env.MULTI_INSTANCE_REQUESTS ?? 50);
+const rpm = Number(process.env.MULTI_INSTANCE_RPM ?? 40);
+const prefix = `multi-cert:${process.pid}:${Date.now()}`;
+const account = `shared-${Date.now()}`;
+const clients = await Promise.all(Array.from({ length: instances }, async () => { const c = createClient({ url }); c.on('error', () => {}); await c.connect(); return c; }));
+const stores = clients.map((c) => new AtomicRedisStateStore(c, prefix));
+const results = await Promise.all(stores.flatMap((store) => Array.from({ length: perInstance }, () => store.reserve(account, 1, { rpm, rpd: 10000, tpm: 10000, tpd: 10000 }))));
+const accepted = results.filter(Boolean).length;
+const quota = await stores[0].getQuotaUsage(account);
+console.log(JSON.stringify({ instances, perInstance, attempted: results.length, rpm, accepted, rejected: results.length - accepted, quota }, null, 2));
+await Promise.all(clients.map((c) => c.quit()));
+if (accepted !== rpm || quota.minuteRequests !== rpm) process.exitCode = 1;
