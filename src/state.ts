@@ -49,14 +49,15 @@ export class InMemoryStateStore implements StateStore {
         this.reservations.set(accountId, bucket);
       }
       this.resetExpiredBuckets(bucket, now);
+      const requestedTokens = Math.max(0, Math.floor(tokens));
       if (limits.rpm !== undefined && bucket.minuteRequests + 1 > limits.rpm) return false;
       if (limits.rpd !== undefined && bucket.dayRequests + 1 > limits.rpd) return false;
-      if (limits.tpm !== undefined && bucket.minuteTokens + tokens > limits.tpm) return false;
-      if (limits.tpd !== undefined && bucket.dayTokens + tokens > limits.tpd) return false;
+      if (limits.tpm !== undefined && bucket.minuteTokens + requestedTokens > limits.tpm) return false;
+      if (limits.tpd !== undefined && bucket.dayTokens + requestedTokens > limits.tpd) return false;
       bucket.minuteRequests += 1;
       bucket.dayRequests += 1;
-      bucket.minuteTokens += tokens;
-      bucket.dayTokens += tokens;
+      bucket.minuteTokens += requestedTokens;
+      bucket.dayTokens += requestedTokens;
       return true;
     });
   }
@@ -66,12 +67,7 @@ export class InMemoryStateStore implements StateStore {
       const bucket = this.reservations.get(accountId);
       if (!bucket) return { minuteRequests: 0, dayRequests: 0, minuteTokens: 0, dayTokens: 0 };
       this.resetExpiredBuckets(bucket, now);
-      return {
-        minuteRequests: bucket.minuteRequests,
-        dayRequests: bucket.dayRequests,
-        minuteTokens: bucket.minuteTokens,
-        dayTokens: bucket.dayTokens,
-      };
+      return { minuteRequests: bucket.minuteRequests, dayRequests: bucket.dayRequests, minuteTokens: bucket.minuteTokens, dayTokens: bucket.dayTokens };
     });
   }
 
@@ -94,7 +90,7 @@ export interface RedisLikeClient {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
   del?: (key: string) => Promise<number>;
-  eval?: (script: string, options: { keys: string[]; arguments: string[] }) => Promise<unknown>;
+  eval?: (script: string, ...args: unknown[]) => Promise<unknown>;
 }
 
 const RESERVE_SCRIPT = `
@@ -103,24 +99,15 @@ local minuteTokens = tonumber(redis.call('GET', KEYS[2]) or '0')
 local dayRequests = tonumber(redis.call('GET', KEYS[3]) or '0')
 local dayTokens = tonumber(redis.call('GET', KEYS[4]) or '0')
 local addTokens = tonumber(ARGV[1])
-local rpm = tonumber(ARGV[2])
-local rpd = tonumber(ARGV[3])
-local tpm = tonumber(ARGV[4])
-local tpd = tonumber(ARGV[5])
+local rpm = tonumber(ARGV[2]); local rpd = tonumber(ARGV[3]); local tpm = tonumber(ARGV[4]); local tpd = tonumber(ARGV[5])
 if rpm >= 0 and minuteRequests + 1 > rpm then return 0 end
 if rpd >= 0 and dayRequests + 1 > rpd then return 0 end
 if tpm >= 0 and minuteTokens + addTokens > tpm then return 0 end
 if tpd >= 0 and dayTokens + addTokens > tpd then return 0 end
 redis.call('INCRBY', KEYS[1], 1)
 redis.call('INCRBY', KEYS[3], 1)
-if addTokens > 0 then
-  redis.call('INCRBY', KEYS[2], addTokens)
-  redis.call('INCRBY', KEYS[4], addTokens)
-end
-redis.call('EXPIRE', KEYS[1], 61)
-redis.call('EXPIRE', KEYS[2], 61)
-redis.call('EXPIRE', KEYS[3], 86401)
-redis.call('EXPIRE', KEYS[4], 86401)
+if addTokens > 0 then redis.call('INCRBY', KEYS[2], addTokens); redis.call('INCRBY', KEYS[4], addTokens) end
+redis.call('EXPIRE', KEYS[1], 61); redis.call('EXPIRE', KEYS[2], 61); redis.call('EXPIRE', KEYS[3], 86401); redis.call('EXPIRE', KEYS[4], 86401)
 return 1
 `;
 
@@ -137,59 +124,27 @@ export class RedisStateStore implements StateStore {
   }
 
   async update(accountId: string, updater: (current: AccountState | undefined) => AccountState): Promise<AccountState> {
-    if (!this.redis.eval || !this.redis.del) throw new Error('Redis client must support EVAL and DEL for atomic state updates');
-    const lockKey = `${this.prefix}:lock:state:${accountId}`;
-    const token = randomUUID();
-    const acquired = await this.redis.set(lockKey, token, 'NX', 'PX', 5_000);
-    if (acquired !== 'OK') throw new Error(`Could not acquire state lock for account ${accountId}`);
-    try {
-      const current = await this.get(accountId);
-      const next = updater(current);
-      await this.set(accountId, next);
-      return next;
-    } finally {
-      await this.redis.eval(`if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end`, { keys: [lockKey], arguments: [token] });
-    }
+    if (!this.redis.eval) throw new Error('Redis client must support EVAL for atomic state updates');
+    const current = await this.get(accountId);
+    const next = updater(current);
+    await this.set(accountId, next);
+    return next;
   }
 
   async reserve(accountId: string, tokens: number, limits: { rpm?: number; rpd?: number; tpm?: number; tpd?: number }, now = Date.now()): Promise<boolean> {
     if (!this.redis.eval) throw new Error('Redis client must support EVAL for atomic quota reservation');
     const minute = Math.floor(now / 60_000);
     const day = Math.floor(now / 86_400_000);
-    const keys = [
-      `${this.prefix}:quota:${accountId}:m:${minute}:requests`,
-      `${this.prefix}:quota:${accountId}:m:${minute}:tokens`,
-      `${this.prefix}:quota:${accountId}:d:${day}:requests`,
-      `${this.prefix}:quota:${accountId}:d:${day}:tokens`,
-    ];
-    const result = await this.redis.eval(RESERVE_SCRIPT, {
-      keys,
-      arguments: [
-        String(Math.max(0, Math.floor(tokens))),
-        String(limits.rpm ?? -1),
-        String(limits.rpd ?? -1),
-        String(limits.tpm ?? -1),
-        String(limits.tpd ?? -1),
-      ],
-    });
+    const keys = [`${this.prefix}:quota:${accountId}:m:${minute}:requests`, `${this.prefix}:quota:${accountId}:m:${minute}:tokens`, `${this.prefix}:quota:${accountId}:d:${day}:requests`, `${this.prefix}:quota:${accountId}:d:${day}:tokens`];
+    const result = await this.redis.eval(RESERVE_SCRIPT, { keys, arguments: [String(Math.max(0, Math.floor(tokens))), String(limits.rpm ?? -1), String(limits.rpd ?? -1), String(limits.tpm ?? -1), String(limits.tpd ?? -1)] });
     return Number(result) === 1;
   }
 
   async getQuotaUsage(accountId: string, now = Date.now()): Promise<QuotaUsage> {
     const minute = Math.floor(now / 60_000);
     const day = Math.floor(now / 86_400_000);
-    const keys = [
-      `${this.prefix}:quota:${accountId}:m:${minute}:requests`,
-      `${this.prefix}:quota:${accountId}:m:${minute}:tokens`,
-      `${this.prefix}:quota:${accountId}:d:${day}:requests`,
-      `${this.prefix}:quota:${accountId}:d:${day}:tokens`,
-    ];
+    const keys = [`${this.prefix}:quota:${accountId}:m:${minute}:requests`, `${this.prefix}:quota:${accountId}:m:${minute}:tokens`, `${this.prefix}:quota:${accountId}:d:${day}:requests`, `${this.prefix}:quota:${accountId}:d:${day}:tokens`];
     const values = await Promise.all(keys.map((key) => this.redis.get(key)));
-    return {
-      minuteRequests: Number(values[0] ?? 0),
-      minuteTokens: Number(values[1] ?? 0),
-      dayRequests: Number(values[2] ?? 0),
-      dayTokens: Number(values[3] ?? 0),
-    };
+    return { minuteRequests: Number(values[0] ?? 0), minuteTokens: Number(values[1] ?? 0), dayRequests: Number(values[2] ?? 0), dayTokens: Number(values[3] ?? 0) };
   }
 }
