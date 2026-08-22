@@ -15,11 +15,17 @@ export class GeminiAdapter implements ProviderAdapter {
 
   private configuredCapabilities(account: AccountConfig): Capability[] {
     const configured = account.metadata?.modelCapabilities;
-    if (!configured) return ['chat', 'streaming'].filter((capability) => account.capabilities.includes(capability)) as Capability[];
+    if (!configured) {
+      return (['chat', 'streaming'] as Capability[]).filter((capability: Capability) => account.capabilities.includes(capability));
+    }
     try {
       const parsed = JSON.parse(configured) as unknown;
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter((value): value is Capability => typeof value === 'string' && ALL_CAPABILITIES.includes(value as Capability) && account.capabilities.includes(value as Capability));
+      return parsed.filter((value): value is Capability =>
+        typeof value === 'string' &&
+        ALL_CAPABILITIES.includes(value as Capability) &&
+        account.capabilities.includes(value as Capability),
+      );
     } catch {
       throw new GatewayError('InvalidRequestError', 'Gemini modelCapabilities metadata must be valid JSON');
     }
@@ -43,72 +49,79 @@ export class GeminiAdapter implements ProviderAdapter {
         responseMimeType: options?.jsonSchema ? 'application/json' : undefined,
         responseSchema: options?.jsonSchema,
       },
-      tools: options?.tools?.length
-        ? [{ functionDeclarations: options.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.inputSchema })) }]
-        : undefined,
+      ...(request.tools?.length ? { tools: [{ functionDeclarations: request.tools }] } : {}),
     };
   }
 
-  private extractCandidate(data: any): { text: string; toolCalls?: ToolCall[] } {
-    const parts = data.candidates?.[0]?.content?.parts ?? [];
-    const text = parts.map((part: any) => part.text ?? '').join('');
-    const toolCalls = parts.filter((part: any) => part.functionCall).map((part: any) => ({ name: String(part.functionCall.name), arguments: (part.functionCall.args ?? {}) as Record<string, unknown> }));
-    return { text, ...(toolCalls.length ? { toolCalls } : {}) };
+  private async send(account: AccountConfig, credential: string, model: string, request: GenerateRequest, stream = false): Promise<Response> {
+    const url = `${this.url(model, stream ? 'streamGenerateContent' : 'generateContent')}${stream ? '?alt=sse' : ''}`;
+    const response = await httpRequest(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': credential },
+      body: JSON.stringify(this.body(request)),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      const retryAfter = response.headers.get('retry-after');
+      throw new GatewayError(response.status === 429 ? 'RateLimitError' : response.status >= 500 ? 'ServerError' : response.status === 401 || response.status === 403 ? 'AuthenticationError' : 'InvalidRequestError', `Gemini request failed with HTTP ${response.status}`, { retryAfter: retryAfter ? Number(retryAfter) : undefined });
+    }
+    return response;
   }
 
   async generate(account: AccountConfig, request: GenerateRequest, model: ModelInfo, credential: string, requestId: string): Promise<GenerateResult> {
     const started = Date.now();
-    const response = await httpRequest(`${this.url(model.id, 'generateContent')}?key=${encodeURIComponent(credential)}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-request-id': requestId },
-      body: JSON.stringify(this.body(request)),
-      signal: request.options?.signal,
-      timeoutMs: TIMEOUT_MS,
-    });
-    const data = await readJson(response);
-    const usage = data.usageMetadata ?? {};
-    const result = this.extractCandidate(data);
-    return { ...result, provider: this.name, accountId: account.id, model: model.id, usage: { inputTokens: usage.promptTokenCount, outputTokens: usage.candidatesTokenCount, totalTokens: usage.totalTokenCount }, requestId, latencyMs: Date.now() - started };
+    const response = await this.send(account, credential, model.id, request);
+    const data = await readJson<Record<string, any>>(response);
+    const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+    const parts = candidates[0]?.content?.parts ?? [];
+    const text = parts.filter((part: any) => typeof part.text === 'string').map((part: any) => part.text).join('');
+    const toolCalls: ToolCall[] = parts.filter((part: any) => part.functionCall).map((part: any) => ({ id: part.functionCall.name, name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args ?? {}) }));
+    const usage = data.usageMetadata ? { inputTokens: data.usageMetadata.promptTokenCount, outputTokens: data.usageMetadata.candidatesTokenCount, totalTokens: data.usageMetadata.totalTokenCount } : undefined;
+    return { text, provider: this.name, accountId: account.id, model: model.id, usage, requestId, latencyMs: Date.now() - started, ...(toolCalls.length ? { toolCalls } : {}) };
   }
 
   async *stream(account: AccountConfig, request: GenerateRequest, model: ModelInfo, credential: string, requestId: string): AsyncIterable<StreamChunk> {
-    const response = await httpRequest(`${this.url(model.id, 'streamGenerateContent')}?alt=sse&key=${encodeURIComponent(credential)}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-request-id': requestId },
-      body: JSON.stringify(this.body(request)),
-      signal: request.options?.signal,
-      timeoutMs: TIMEOUT_MS,
-    });
-    if (!response.ok || !response.body) throw new GatewayError(response.status === 429 ? 'RateLimitError' : 'ProviderUnavailableError', `Gemini streaming request failed with HTTP ${response.status}`, response.status === 429 || response.status >= 500);
-    const reader = response.body.getReader();
+    const response = await this.send(account, credential, model.id, request, true);
+    const reader = response.body?.getReader();
+    if (!reader) throw new GatewayError('ServerError', 'Gemini returned an empty streaming response');
     const decoder = new TextDecoder();
     let buffer = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        try { const result = this.extractCandidate(JSON.parse(line.slice(5))); if (result.text) yield { text: result.text }; if (result.toolCalls?.length) yield { text: '', usage: undefined }; } catch { /* Ignore SSE keep-alives. */ }
+    let usage;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (!payload) continue;
+          const data = JSON.parse(payload) as any;
+          const parts = data.candidates?.[0]?.content?.parts ?? [];
+          const text = parts.filter((part: any) => typeof part.text === 'string').map((part: any) => part.text).join('');
+          if (data.usageMetadata) usage = { inputTokens: data.usageMetadata.promptTokenCount, outputTokens: data.usageMetadata.candidatesTokenCount, totalTokens: data.usageMetadata.totalTokenCount };
+          const toolCalls: ToolCall[] = parts.filter((part: any) => part.functionCall).map((part: any) => ({ id: part.functionCall.name, name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args ?? {}) }));
+          if (text || toolCalls.length) yield { text, ...(toolCalls.length ? { toolCalls } : {}), ...(usage ? { usage } : {}) };
+        }
       }
+      yield { text: '', done: true, ...(usage ? { usage } : {}) };
+    } finally {
+      reader.releaseLock();
     }
-    yield { text: '', done: true };
   }
 
   async discoverModels(account: AccountConfig, credential: string): Promise<ModelInfo[]> {
-    const response = await httpRequest(`${this.url('', 'listModels')}?key=${encodeURIComponent(credential)}`, { timeoutMs: TIMEOUT_MS });
-    const data = await readJson(response);
-    const configuredCapabilities = this.configuredCapabilities(account);
-    return (data.models ?? []).map((m: any) => {
-      const methods = Array.isArray(m.supportedGenerationMethods) ? m.supportedGenerationMethods.map(String) : [];
-      const capabilities = configuredCapabilities.filter((capability) => {
-        if (capability === 'chat') return methods.length === 0 || methods.includes('generateContent');
-        return true;
-      });
-      return { id: String(m.name ?? '').replace(/^models\//, ''), provider: this.name, capabilities, contextWindow: m.inputTokenLimit, available: true, metadata: m };
-    }).filter((m: ModelInfo) => Boolean(m.id));
+    const response = await httpRequest(this.url('', 'listModels'), { headers: { 'x-goog-api-key': credential }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!response.ok) throw new GatewayError(response.status === 429 ? 'RateLimitError' : response.status === 401 || response.status === 403 ? 'AuthenticationError' : 'ServerError', `Gemini model discovery failed with HTTP ${response.status}`);
+    const data = await readJson<{ models?: Array<{ name?: string; supportedGenerationMethods?: string[] }> }>(response);
+    const capabilities = this.configuredCapabilities(account);
+    return (data.models ?? []).filter((m) => m.name?.startsWith('models/')).map((m) => {
+      const supported = m.supportedGenerationMethods ?? [];
+      const modelCapabilities: Capability[] = capabilities.filter((capability: Capability) => capability === 'chat' ? supported.includes('generateContent') : capability === 'streaming' ? supported.includes('streamGenerateContent') : capability === 'structured_output' ? supported.includes('generateContent') : capability === 'tool_calling' ? supported.includes('generateContent') : capability === 'vision' ? true : false);
+      return { id: m.name!.replace(/^models\//, ''), provider: this.name, capabilities: modelCapabilities, available: true };
+    });
   }
 
   async healthCheck(account: AccountConfig, credential: string): Promise<boolean> {
