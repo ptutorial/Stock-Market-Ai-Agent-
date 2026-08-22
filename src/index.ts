@@ -18,6 +18,7 @@ export * from './tools.js';
 export * from './agents.js';
 export * from './agent-runtime.js';
 export * from './recommendation.js';
+export * from './recommendation-orchestrator.js';
 export * from './market-data.js';
 export * from './stock-tools.js';
 export * from './stock-snapshot.js';
