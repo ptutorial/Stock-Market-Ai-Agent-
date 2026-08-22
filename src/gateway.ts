@@ -3,6 +3,7 @@ import { GatewayError, normalizeError } from './errors.js';
 import type {
   AccountConfig,
   AccountState,
+  Capability,
   GenerateRequest,
   GenerateResult,
   ModelInfo,
@@ -86,22 +87,10 @@ export class LLMGateway {
     }
   }
 
-  async generate(
-    task: TaskType,
-    prompt: string,
-    options: GenerateRequest['options'] = {},
-  ): Promise<GenerateResult> {
-    const request: GenerateRequest = {
-      prompt,
-      options: { ...options, task: options.task ?? task },
-    };
+  async generate(task: TaskType, prompt: string, options: GenerateRequest['options'] = {}): Promise<GenerateResult> {
+    const request: GenerateRequest = { prompt, options: { ...options, task: options.task ?? task } };
     const candidates = await this.selectCandidates(request);
-    if (!candidates.length) {
-      throw new GatewayError(
-        'ProviderUnavailableError',
-        'No eligible provider/account/model is available',
-      );
-    }
+    if (!candidates.length) throw new GatewayError('ProviderUnavailableError', 'No eligible provider/account/model is available');
 
     const requestId = randomUUID();
     let lastError: GatewayError | undefined;
@@ -111,37 +100,15 @@ export class LLMGateway {
         try {
           const credential = await this.credentialStore.get(candidate.account.credentialRef);
           const started = Date.now();
-          const result = await candidate.adapter.generate(
-            candidate.account,
-            request,
-            candidate.model,
-            credential,
-            requestId,
-          );
+          const result = await candidate.adapter.generate(candidate.account, request, candidate.model, credential, requestId);
           this.markSuccess(candidate.account.id, result.usage.totalTokens ?? 0);
-          await this.usage.record({
-            requestId,
-            provider: candidate.account.provider,
-            accountId: candidate.account.id,
-            model: result.model,
-            latencyMs: Date.now() - started,
-            success: true,
-            usage: result.usage,
-          });
+          await this.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: result.model, latencyMs: Date.now() - started, success: true, usage: result.usage });
           return result;
         } catch (error) {
           const normalized = normalizeError(error);
           lastError = normalized;
           this.markFailure(candidate.account.id, normalized);
-          await this.usage.record({
-            requestId,
-            provider: candidate.account.provider,
-            accountId: candidate.account.id,
-            model: candidate.model.id,
-            success: false,
-            errorCategory: normalized.category,
-            retry: attempt < this.config.maxRetries && normalized.retryable,
-          });
+          await this.usage.record({ requestId, provider: candidate.account.provider, accountId: candidate.account.id, model: candidate.model.id, success: false, errorCategory: normalized.category, retry: attempt < this.config.maxRetries && normalized.retryable });
           if (!normalized.retryable || attempt === this.config.maxRetries) break;
           await this.backoff(attempt, normalized.retryAfterMs);
         }
@@ -151,38 +118,17 @@ export class LLMGateway {
     throw lastError ?? new GatewayError('ProviderUnavailableError', 'All eligible providers failed');
   }
 
-  stream(
-    task: TaskType,
-    prompt: string,
-    options: GenerateRequest['options'] = {},
-  ): AsyncIterable<StreamChunk> {
+  stream(task: TaskType, prompt: string, options: GenerateRequest['options'] = {}): AsyncIterable<StreamChunk> {
     const self = this;
     return (async function* () {
-      const request: GenerateRequest = {
-        prompt,
-        options: { ...options, task: options.task ?? task },
-      };
+      const request: GenerateRequest = { prompt, options: { ...options, task: options.task ?? task } };
       const candidates = await self.selectCandidates(request);
       const candidate = candidates[0];
-      if (!candidate) {
-        throw new GatewayError(
-          'ProviderUnavailableError',
-          'No eligible provider/account/model is available',
-        );
-      }
-
+      if (!candidate) throw new GatewayError('ProviderUnavailableError', 'No eligible provider/account/model is available');
       const credential = await self.credentialStore.get(candidate.account.credentialRef);
       const requestId = randomUUID();
       try {
-        for await (const chunk of candidate.adapter.stream(
-          candidate.account,
-          request,
-          candidate.model,
-          credential,
-          requestId,
-        )) {
-          yield chunk;
-        }
+        for await (const chunk of candidate.adapter.stream(candidate.account, request, candidate.model, credential, requestId)) yield chunk;
         self.markSuccess(candidate.account.id, 0);
       } catch (error) {
         self.markFailure(candidate.account.id, normalizeError(error));
@@ -192,56 +138,45 @@ export class LLMGateway {
   }
 
   private async selectCandidates(request: GenerateRequest): Promise<Candidate[]> {
-    const required = new Set(request.options?.capabilities ?? ['chat']);
+    const required: Capability[] = request.options?.capabilities ?? ['chat'];
     const providerOrder = this.cfg.fallbackProviders ?? [...this.adapters.keys()];
     const result: Candidate[] = [];
 
     for (const provider of providerOrder) {
       const adapter = this.adapters.get(provider);
       if (!adapter) continue;
-
       for (const account of this.cfg.accounts.filter((item) => item.provider === provider)) {
         const state = this.states.get(account.id);
-        if (!state) continue;
-        if (account.enabled === false || state.health === 'disabled') continue;
+        if (!state || account.enabled === false || state.health === 'disabled') continue;
         if ((state.cooldownUntil ?? 0) > Date.now()) continue;
-        if (![...required].every((capability) => account.capabilities.includes(capability))) continue;
-
-        const models = request.options?.model
-          ? account.models.filter((model) => model === request.options?.model)
-          : account.models;
+        if (!required.every((capability) => account.capabilities.includes(capability))) continue;
+        const models = request.options?.model ? account.models.filter((model) => model === request.options?.model) : account.models;
         if (!models.length) continue;
-
-        const discovered = await adapter.discoverModels(account, await this.credentialStore.get(account.credentialRef));
+        const credential = await this.credentialStore.get(account.credentialRef);
+        const discovered = await adapter.discoverModels(account, credential);
         for (const model of discovered) {
           if (!models.includes(model.id)) continue;
-          if (![...required].every((capability) => model.capabilities.includes(capability))) continue;
+          if (!required.every((capability) => model.capabilities.includes(capability))) continue;
           result.push({ account, state, adapter, model, score: this.score(account, state) });
         }
       }
     }
-
     return result.sort((a, b) => b.score - a.score);
   }
 
   private score(account: AccountConfig, state: AccountState): number {
     switch (this.cfg.strategy ?? 'priority') {
-      case 'lowest_utilization':
-        return -(state.requests + state.tokens / 1000);
-      case 'least_recently_used':
-        return -(state.lastUsedAt ?? 0);
-      case 'fastest':
-        return account.priority ?? 0;
-      case 'cheapest':
-        return -((account.costPerMillionInput ?? 0) + (account.costPerMillionOutput ?? 0));
+      case 'lowest_utilization': return -(state.requests + state.tokens / 1000);
+      case 'least_recently_used': return -(state.lastUsedAt ?? 0);
+      case 'fastest': return account.priority ?? 0;
+      case 'cheapest': return -((account.costPerMillionInput ?? 0) + (account.costPerMillionOutput ?? 0));
       case 'round_robin': {
         const accounts = this.cfg.accounts.filter((item) => item.provider === account.provider);
         const cursor = this.roundRobinCursor.get(account.provider) ?? 0;
         const index = accounts.findIndex((item) => item.id === account.id);
         return -((index - cursor + accounts.length) % Math.max(1, accounts.length));
       }
-      default:
-        return account.priority ?? 0;
+      default: return account.priority ?? 0;
     }
   }
 
@@ -263,12 +198,7 @@ export class LLMGateway {
     if (!state) return;
     state.lastFailureAt = Date.now();
     state.failures += 1;
-    state.health =
-      error.category === 'RateLimitError'
-        ? 'rate_limited'
-        : error.category === 'AuthenticationError'
-          ? 'authentication_failure'
-          : 'degraded';
+    state.health = error.category === 'RateLimitError' ? 'rate_limited' : error.category === 'AuthenticationError' ? 'authentication_failure' : 'degraded';
     state.cooldownUntil = Date.now() + (error.retryAfterMs ?? this.config.cooldownMs);
   }
 
