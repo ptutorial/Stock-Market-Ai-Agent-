@@ -8,6 +8,8 @@ import { GroqAdapter, OpenRouterAdapter } from './providers/openai-compatible.js
 import { AtomicRedisStateStore } from './redis.js';
 import type { RedisAtomicClient } from './redis.js';
 import type { StateStore } from './state.js';
+import { EnvironmentCredentialStore } from './gateway.js';
+import { HealthMonitor } from './health.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const apiKey = process.env.GATEWAY_API_KEY;
@@ -16,11 +18,13 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Invali
 
 const config = loadConfigFromEnvironment();
 const adapters = [new GeminiAdapter(), new GroqAdapter(), new OpenRouterAdapter(), new CloudflareWorkersAIAdapter()];
-const configuredProviders = new Set(flattenAccounts(config).map((account) => account.provider));
+const accounts = flattenAccounts(config);
+const configuredProviders = new Set(accounts.map((account) => account.provider));
 const availableProviders = new Set(adapters.map((adapter) => adapter.name));
 for (const provider of configuredProviders) {
   if (!availableProviders.has(provider)) throw new Error(`No adapter is registered for configured provider: ${provider}`);
 }
+if (!accounts.length) throw new Error('No enabled gateway accounts are configured');
 
 let redisClient: ReturnType<typeof createClient> | undefined;
 let stateStore: StateStore;
@@ -34,22 +38,31 @@ if (process.env.REDIS_URL) {
   stateStore = new InMemoryStateStore();
 }
 
-const accounts = flattenAccounts(config);
-if (!accounts.length) throw new Error('No enabled gateway accounts are configured');
 const maxBodyBytes = Number(process.env.GATEWAY_REQUEST_BODY_LIMIT_BYTES ?? 1_048_576);
 if (!Number.isInteger(maxBodyBytes) || maxBodyBytes < 1) throw new Error('Invalid GATEWAY_REQUEST_BODY_LIMIT_BYTES');
+const healthIntervalMs = Number(process.env.GATEWAY_HEALTH_CHECK_INTERVAL_MS ?? 30_000);
+if (!Number.isInteger(healthIntervalMs) || healthIntervalMs < 5_000) throw new Error('Invalid GATEWAY_HEALTH_CHECK_INTERVAL_MS');
 
-const gatewayOptions: GatewayHttpServerOptions = {
-  accounts,
-  adapters,
-  strategy: config.strategy,
-  maxRetries: config.maxRetries,
-  cooldownMs: config.cooldownMs,
-  stateStore,
-  apiKey,
-  maxBodyBytes,
-};
+const gatewayOptions: GatewayHttpServerOptions = { accounts, adapters, strategy: config.strategy, maxRetries: config.maxRetries, cooldownMs: config.cooldownMs, stateStore, apiKey, maxBodyBytes };
 const handler = createGatewayHttpHandler(gatewayOptions);
+const credentialStore = new EnvironmentCredentialStore();
+const healthMonitor = new HealthMonitor();
+const adapterMap = new Map(adapters.map((adapter) => [adapter.name, adapter]));
+let healthTimer: ReturnType<typeof setInterval> | undefined;
+let shuttingDown = false;
+
+const checkHealth = async () => {
+  if (shuttingDown) return;
+  await Promise.all(accounts.map(async (account) => {
+    const adapter = adapterMap.get(account.provider);
+    if (!adapter) return;
+    const credential = await credentialStore.get(account.credentialRef).catch(() => undefined);
+    if (!credential) return;
+    const state = await stateStore.get(account.id) ?? { requests: 0, tokens: 0, failures: 0, health: 'healthy' as const };
+    const next = await healthMonitor.check(account.id, account, adapter, credential, state);
+    await stateStore.set(account.id, next);
+  }));
+};
 
 const server = createServer(async (req, res) => {
   try {
@@ -67,45 +80,37 @@ const server = createServer(async (req, res) => {
       }
       chunks.push(buffer);
     }
-
     const raw = Buffer.concat(chunks).toString('utf8');
     let body: unknown = {};
-    try {
-      body = raw ? JSON.parse(raw) : {};
-    } catch {
+    try { body = raw ? JSON.parse(raw) : {}; } catch {
       res.statusCode = 400;
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ error: 'InvalidRequest' }));
       return;
     }
-
-    const result = await handler({
-      method: req.method ?? 'GET',
-      path: req.url ?? '/',
-      body,
-      headers: {
-        authorization: req.headers.authorization,
-        'x-request-id': req.headers['x-request-id'] as string | undefined,
-      },
-    });
+    const result = await handler({ method: req.method ?? 'GET', path: req.url ?? '/', body, headers: { authorization: req.headers.authorization, 'x-request-id': req.headers['x-request-id'] as string | undefined } });
     res.statusCode = result.status;
     for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
     res.end(JSON.stringify(result.body));
   } catch (error: unknown) {
     console.error('HTTP request error', error);
-    res.statusCode = 400;
+    res.statusCode = 500;
     res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify({ error: 'InvalidRequest' }));
+    res.end(JSON.stringify({ error: 'InternalServerError' }));
   }
 });
 
 const shutdown = async (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (healthTimer) clearInterval(healthTimer);
   console.log(`Received ${signal}; shutting down`);
-  server.close(async () => {
-    if (redisClient?.isOpen) await redisClient.quit();
-    process.exit(0);
-  });
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (redisClient?.isOpen) await redisClient.quit();
 };
-process.once('SIGTERM', () => void shutdown('SIGTERM'));
-process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM').then(() => process.exit(0)));
+process.once('SIGINT', () => void shutdown('SIGINT').then(() => process.exit(0)));
+
+await checkHealth();
+healthTimer = setInterval(() => void checkHealth().catch((error: unknown) => console.error('Health check cycle failed', error)), healthIntervalMs);
 server.listen(port, '0.0.0.0', () => console.log(`LLM gateway listening on ${port}`));
