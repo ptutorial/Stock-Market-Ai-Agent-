@@ -1,6 +1,6 @@
 import type { AccountConfig, GenerateRequest, GenerateResult, ModelInfo, ProviderAdapter, StreamChunk } from '../domain.js';
 import { GatewayError } from '../errors.js';
-import { messages, readJson, request, streamSSE, usageFromOpenAI } from './http.js';
+import { messages, readJson, request as httpRequest, streamSSE, usageFromOpenAI } from './http.js';
 
 const TIMEOUT_MS = 30_000;
 
@@ -19,7 +19,7 @@ export class CloudflareWorkersAIAdapter implements ProviderAdapter {
 
   async generate(account: AccountConfig, request: GenerateRequest, model: ModelInfo, credential: string, requestId: string): Promise<GenerateResult> {
     const started = Date.now();
-    const response = await request(this.endpoint(account, model.id), {
+    const response = await httpRequest(this.endpoint(account, model.id), {
       method: 'POST',
       headers: { ...this.headers(credential), 'x-request-id': requestId },
       body: JSON.stringify({ messages: messages(request), max_tokens: request.options?.maxTokens, temperature: request.options?.temperature }),
@@ -32,7 +32,7 @@ export class CloudflareWorkersAIAdapter implements ProviderAdapter {
   }
 
   async *stream(account: AccountConfig, request: GenerateRequest, model: ModelInfo, credential: string, requestId: string): AsyncIterable<StreamChunk> {
-    const response = await request(this.endpoint(account, model.id), {
+    const response = await httpRequest(this.endpoint(account, model.id), {
       method: 'POST',
       headers: { ...this.headers(credential), 'x-request-id': requestId },
       body: JSON.stringify({ messages: messages(request), stream: true, max_tokens: request.options?.maxTokens, temperature: request.options?.temperature }),
@@ -48,7 +48,7 @@ export class CloudflareWorkersAIAdapter implements ProviderAdapter {
 
   async healthCheck(account: AccountConfig, credential: string): Promise<boolean> {
     try {
-      const response = await request(this.endpoint(account, account.models[0]), { method: 'POST', headers: this.headers(credential), body: JSON.stringify({ messages: [{ role: 'user', content: 'health check' }], max_tokens: 1 }), timeoutMs: TIMEOUT_MS });
+      const response = await httpRequest(this.endpoint(account, account.models[0]), { method: 'POST', headers: this.headers(credential), body: JSON.stringify({ messages: [{ role: 'user', content: 'health check' }], max_tokens: 1 }), timeoutMs: TIMEOUT_MS });
       return response.ok;
     } catch { return false; }
   }
