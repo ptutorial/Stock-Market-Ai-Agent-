@@ -115,73 +115,88 @@ The application must not contain provider-specific branching.
 
 **Status:** Implemented — CI verification pending
 
-### Goals
-
-Respect configured provider limits and normalize rate-limit signals without attempting to bypass provider restrictions.
-
 ### Completed
 
-- Added `src/limits.ts` with `RateLimitTracker`.
-- RPM enforcement.
-- RPD enforcement.
-- TPM enforcement.
-- TPD enforcement.
-- Minute and daily rolling windows.
-- Request/token accounting per account.
-- `Retry-After` parsing for seconds and HTTP-date values.
-- Common `X-RateLimit-*` header parsing.
-- Account cooldown tracking after rate-limit responses.
-- Rate-limited state merge helper.
-- Public export through `src/index.ts`.
-- Unit tests for RPM/TPM, RPD, cooldowns and header parsing.
-
-### Rate-limit flow
-
-```text
-Provider Response
-      |
-      +--> Rate-limit headers
-      +--> Retry-After
-      |
-      v
-RateLimitTracker
-      |
-      +--> record request/tokens
-      +--> enforce RPM/RPD
-      +--> enforce TPM/TPD
-      +--> calculate cooldown
-      |
-      v
-Routing eligibility
-```
-
-### Important constraint
-
-Multiple accounts may be used for legitimate separation such as projects, organizations, environments, billing ownership or provider-approved quota allocation. They must never be used to bypass provider restrictions.
-
-### Exit criteria
-
-- RPM/RPD limits are enforced. **Complete.**
-- TPM/TPD limits are enforced. **Complete.**
-- Provider `Retry-After` information can create cooldown state. **Complete.**
-- Common rate-limit headers can be normalized. **Complete.**
-- Account capacity can be checked before routing. **Complete.**
-- Rate-limit tracking does not rotate accounts as a quota-bypass mechanism. **Complete.**
-- CI build and test verification. **Pending.**
-
-### Phase note
-
-Distributed atomic counters and cross-worker quota coordination belong to Phase 8. Retry scheduling and provider fallback belong to Phase 7. This phase deliberately provides the local rate-limit/quota boundary those phases will consume.
+- `RateLimitTracker` with RPM/RPD/TPM/TPD enforcement.
+- Rolling minute/day accounting.
+- `Retry-After` parsing.
+- Common rate-limit header parsing.
+- Account cooldown state.
+- Rate-limit tests.
 
 ---
 
 # Phase 7 — Retry, Failure Classification & Fallback
 
-**Status:** Planned
+**Status:** Implemented — CI verification pending
 
 ### Goals
 
-Make failures recoverable without creating retry storms or incorrect fallbacks.
+Recover from transient provider failures without retry storms, unsafe retries, or capability-breaking fallbacks.
+
+### Completed
+
+- Added `src/retry.ts`.
+- Added normalized retryability classification using `GatewayError` categories.
+- Explicitly prevents retries for authentication, invalid-request and unsupported-capability failures.
+- Added bounded retry execution with configurable maximum attempts.
+- Added exponential backoff.
+- Added configurable jitter.
+- Added maximum backoff cap.
+- Honors provider `retryAfterMs` when present.
+- Added retry callback for instrumentation hooks.
+- Added injectable sleep function for deterministic tests.
+- Added capability-aware fallback selection.
+- Excludes unavailable fallback candidates.
+- Exported retry/fallback APIs from `src/index.ts`.
+- Added tests for retry classification, backoff, success-after-retry, non-retryable authentication failures and capability-preserving fallback.
+
+### Retry flow
+
+```text
+Provider Error
+      |
+      v
+normalizeError()
+      |
+      +--> retryable?
+      |       |
+      |       +-- no --> return error
+      |       |
+      |       +-- yes
+      v
+Retry-After available?
+      |
+      +--> yes --> wait Retry-After
+      |
+      +--> no --> exponential backoff + jitter
+      |
+      v
+Attempt limit reached?
+      |
+      +--> yes --> fallback / return error
+      |
+      +--> no --> retry
+```
+
+### Fallback rules
+
+Fallback selection requires all requested capabilities to be present on the candidate. A candidate marked unavailable is skipped. The phase does not blindly fallback authentication failures, malformed requests or unsupported capabilities.
+
+### Exit criteria
+
+- Retryable failures are classified. **Complete.**
+- Non-retryable failures are not retried. **Complete.**
+- Retry count is bounded. **Complete.**
+- Exponential backoff is implemented. **Complete.**
+- Jitter is configurable. **Complete.**
+- `Retry-After` can override calculated delay. **Complete.**
+- Fallback preserves required capabilities. **Complete.**
+- CI build and test verification. **Pending.**
+
+### Phase note
+
+Provider-specific account rotation and distributed retry coordination are deliberately deferred. Phase 7 supplies the policy/execution boundary that later gateway orchestration can consume.
 
 ---
 
@@ -311,7 +326,7 @@ Phase 5  Routing engine                     [IMPLEMENTED]
    |
 Phase 6  Rate limits / quotas               [IMPLEMENTED]
    |
-Phase 7  Retry / fallback
+Phase 7  Retry / fallback                   [IMPLEMENTED]
    |
 Phase 8  Concurrency / distributed state
    |
