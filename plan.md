@@ -34,69 +34,71 @@ The Redis state boundary exists, but cross-process atomic quota reservation rema
 **Status:** Implemented — CI verification pending
 # Phase 12 — Security Hardening
 **Status:** Implemented — CI verification pending
-
 # Phase 13 — Comprehensive Testing
+**Status:** Implemented — CI verification pending
+
+### Verification requirement
+CI must execute the complete build and test suite and be green before historical CI-pending phases are considered verified. No phase is declared CI-green based on code inspection alone.
+
+# Phase 14 — Developer API & SDK
 **Status:** Implemented — CI verification pending
 
 ### Goals
 
-Establish broad automated coverage across the gateway's domain contracts, routing, retries, fallback, quotas, state, usage, health, observability, security and provider adapters. The CI pipeline must execute the complete test suite and fail on any build or test regression.
+Provide a clean, typed developer-facing API over the gateway without exposing internal routing, retry, credential or provider implementation details.
 
 ### Completed
 
-- Added `test/comprehensive.test.mjs` for cross-phase integration coverage.
-- Verified the public package surface exposes the Phase 9–12 building blocks.
-- Added an end-to-end usage → accounting → observability flow test.
-- Added retry and capability-aware fallback integration coverage.
-- Added health quarantine and cooldown routing coverage.
-- Added security boundary coverage for credential references, redaction and outbound URL validation.
-- Added explicit coverage proving authentication errors are not retryable.
-- Preserved the existing `npm test` contract: build first, then execute every `test/*.test.mjs` file.
-- CI remains configured for Node 20, build verification and the full test suite.
+- Added `src/sdk.ts`.
+- Added `GatewayClient` for high-level `generate()` and `stream()` operations.
+- Added `GatewayClientOptions` for accounts, adapters, credential store, usage sink and gateway policies.
+- Added `GenerateInput` with typed task, prompt and generation options.
+- Added `GatewayClientBuilder` for incremental configuration.
+- Added account and adapter validation at build time.
+- Added validation for retry and cooldown configuration.
+- Added `createGatewayClient()` convenience factory.
+- Added `gatewayClient()` fluent builder factory.
+- Exported SDK APIs from `src/index.ts`.
+- Added SDK unit/integration tests for validation, generation and streaming.
 
-### Test layers
+### Developer API
 
-```text
-Unit tests
-   ↓
-Domain / limits / retry / router / usage / health / security / observability
+```ts
+const client = gatewayClient()
+  .addAccount(account)
+  .addAdapter(adapter)
+  .credentialStore(credentials)
+  .strategy('priority')
+  .maxRetries(2)
+  .build();
 
-Provider tests
-   ↓
-Provider adapter request/response/error normalization
+const result = await client.generate({
+  task: 'general',
+  prompt: 'Hello',
+});
 
-Cross-phase tests
-   ↓
-Usage → observability
-Retry → fallback
-Health → eligibility
-Security → request boundaries
-
-CI
-   ↓
-npm install
-   ↓
-npm run build
-   ↓
-npm test
+for await (const chunk of client.stream({
+  task: 'general',
+  prompt: 'Stream this',
+})) {
+  process.stdout.write(chunk.text);
+}
 ```
 
-### CI requirement
+### Design boundary
 
-The repository CI workflow uses Node 20, installs dependencies, runs `npm run build`, and runs `npm test`; `npm test` itself also rebuilds before executing the complete `test/*.test.mjs` suite. fileciteturn156file0L2-L4 fileciteturn154file0L2-L5
+The SDK delegates execution to `LLMGateway`; it does not duplicate routing, retry, credential retrieval, health or provider logic. This keeps the public developer API stable while allowing the internal gateway implementation to evolve.
 
-### Verification status
+### Exit criteria
 
-- Test coverage expanded. **Complete.**
-- Cross-phase security checks added. **Complete.**
-- Full test-suite command preserved. **Complete.**
-- CI configuration reviewed. **Complete.**
-- CI run result for this exact commit. **Pending external GitHub Actions execution.**
+- Typed high-level generate API. **Complete.**
+- Typed streaming API. **Complete.**
+- Fluent builder API. **Complete.**
+- Configuration validation. **Complete.**
+- Existing gateway behavior reused rather than duplicated. **Complete.**
+- SDK tests added. **Complete.**
+- CI build/test verification. **Pending.**
 
-I will not claim a green CI result until GitHub Actions has actually executed the new commit. Local execution from this environment is not possible because outbound access to GitHub is unavailable.
-
-# Phase 14 — Developer API & SDK
-**Status:** Planned
 # Phase 15 — Service/API Layer
 **Status:** Optional / Later
 # Phase 16 — Redis & Production Scaling
@@ -137,7 +139,7 @@ Phase 10 Health monitoring                  [IMPLEMENTED]
 Phase 11 Observability                     [IMPLEMENTED]
 Phase 12 Security hardening                [IMPLEMENTED]
 Phase 13 Comprehensive testing             [IMPLEMENTED]
-Phase 14 Developer API / SDK
+Phase 14 Developer API / SDK               [IMPLEMENTED]
 Phase 15 Optional service API
 Phase 16 Optional Redis scaling
 Phase 17 Additional providers
