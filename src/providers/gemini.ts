@@ -83,7 +83,7 @@ export class GeminiAdapter implements ProviderAdapter {
     const candidates = Array.isArray(data.candidates) ? data.candidates : [];
     const parts = candidates[0]?.content?.parts ?? [];
     const text = parts.filter((part: any) => typeof part.text === 'string').map((part: any) => part.text).join('');
-    const toolCalls: ToolCall[] = parts.filter((part: any) => part.functionCall).map((part: any) => ({ id: part.functionCall.name, name: part.functionCall.name, arguments: (part.functionCall.args ?? {}) as Record<string, unknown> }));
+    const toolCalls: ToolCall[] = parts.filter((part: any) => part.functionCall).map((part: any) => ({ name: part.functionCall.name, arguments: (part.functionCall.args ?? {}) as Record<string, unknown> }));
     const usage = data.usageMetadata ? { inputTokens: data.usageMetadata.promptTokenCount, outputTokens: data.usageMetadata.candidatesTokenCount, totalTokens: data.usageMetadata.totalTokenCount } : {};
     return { text, provider: this.name, accountId: account.id, model: model.id, usage, requestId, latencyMs: Date.now() - started, ...(toolCalls.length ? { toolCalls } : {}) };
   }
