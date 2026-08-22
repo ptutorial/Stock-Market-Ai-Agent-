@@ -20,7 +20,7 @@ export interface GenerateOptions {
 export interface GenerateRequest { prompt: string; messages?: LLMMessage[]; options?: GenerateOptions; }
 export interface Usage { inputTokens?: number; outputTokens?: number; totalTokens?: number; estimatedCost?: number; currency?: string; }
 export interface GenerateResult { text: string; toolCalls?: ToolCall[]; provider: ProviderName; accountId: string; model: string; usage: Usage; requestId: string; latencyMs: number; }
-export interface StreamChunk { text: string; done?: boolean; usage?: Usage; }
+export interface StreamChunk { text: string; done?: boolean; usage?: Usage; toolCalls?: ToolCall[]; }
 
 export interface ModelInfo {
   id: string;
