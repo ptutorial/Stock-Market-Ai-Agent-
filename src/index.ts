@@ -12,6 +12,7 @@ export * from './observability.js';
 export * from './security.js';
 export * from './gateway.js';
 export * from './sdk.js';
+export * from './http.js';
 export { GeminiAdapter } from './providers/gemini.js';
 export { GroqAdapter, OpenRouterAdapter } from './providers/openai-compatible.js';
 export { CloudflareWorkersAIAdapter } from './providers/cloudflare.js';
