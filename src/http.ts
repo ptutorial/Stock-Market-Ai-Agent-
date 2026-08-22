@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { GenerateOptions, StreamChunk, TaskType } from './domain.js';
+import { GatewayError } from './errors.js';
 import { GatewayClient, type GatewayClientOptions } from './sdk.js';
 
 export interface GatewayHttpRequest { method: string; path: string; body?: unknown; headers?: Record<string, string | undefined>; }
@@ -25,8 +26,9 @@ export function createGatewayHttpHandler(options: GatewayHttpServerOptions) {
       }
       return { status: 404, headers, body: { error: 'NotFound', requestId } };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Request failed';
-      return { status: 502, headers, body: { error: 'GatewayError', message, requestId } };
+      const normalized = error instanceof GatewayError ? error : new GatewayError('ProviderUnavailableError', 'Gateway request failed');
+      const status = normalized.category === 'AuthenticationError' ? 401 : normalized.category === 'RateLimitError' ? 429 : normalized.category === 'InvalidRequestError' ? 400 : 502;
+      return { status, headers, body: { error: normalized.category, message: normalized.category === 'InvalidRequestError' ? normalized.message : 'Gateway request failed', requestId } };
     }
   };
 }
