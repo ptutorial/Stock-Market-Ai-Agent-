@@ -16,6 +16,7 @@ LLM Gateway
     +--> Model Registry / Discovery
     +--> Model Router
     +--> Account Selector
+    +--> Rate Limit / Quota Tracker
     +--> Retry / Backoff
     +--> Provider Fallback
     +--> Usage / Cost Tracking
@@ -77,48 +78,20 @@ The application must not contain provider-specific branching.
 - Health-check hooks.
 - Provider adapter tests using mocked `fetch`.
 
-### Exit criteria
-
-- Authenticate securely. **Implemented.**
-- Generate a completion. **Implemented.**
-- Stream where supported. **Implemented.**
-- Report capabilities/model information. **Implemented.**
-- Return normalized usage/errors. **Implemented.**
-- Be mocked without real network calls. **Implemented.**
-- CI build and test verification. **Pending.**
-
 ---
 
 # Phase 4 — Model & Capability Discovery
 
 **Status:** Implemented — CI verification pending
 
-### Goals
-
-Stop assuming that every model supports every feature and provide a reusable model metadata/cache boundary for routing.
-
 ### Completed
 
-- Added `ModelRegistry` in `src/model-registry.ts`.
-- Added provider adapter discovery integration through the registry.
-- Added TTL-based discovery caching.
-- Added forced refresh support.
-- Added explicit cache invalidation.
-- Normalized discovered provider/model metadata.
-- Intersected discovered capabilities with the account's configured capabilities.
-- Preserved model availability metadata.
-- Added account identity to normalized model metadata.
-- Exported `ModelRegistry` from the public package API.
-- Added unit tests for cache reuse, forced refresh, invalidation and capability filtering.
-
-### Exit criteria
-
-- Provider model discovery is available through a common registry. **Complete.**
-- Static/account model metadata remains usable when provider discovery is limited. **Complete.**
-- Model capabilities are represented by `ModelInfo`. **Complete.**
-- Cached discovery avoids unnecessary provider calls. **Complete.**
-- Capability filtering cannot add capabilities that the account does not permit. **Complete.**
-- CI build and test verification. **Pending.**
+- `ModelRegistry` with TTL cache.
+- Forced refresh and invalidation.
+- Model metadata normalization.
+- Capability filtering against account configuration.
+- Model availability tracking.
+- Registry tests.
 
 ---
 
@@ -126,92 +99,61 @@ Stop assuming that every model supports every feature and provide a reusable mod
 
 **Status:** Implemented — CI verification pending
 
-### Goals
-
-Build a provider-neutral routing engine that selects an eligible account/model using capability requirements, account health, availability and configurable routing strategy.
-
 ### Completed
 
-- Added `src/router.ts` with `ModelRouter`.
-- Added candidate generation from accounts, account states, provider adapters and discovered models.
-- Added filtering for disabled accounts.
-- Added filtering for unhealthy/disabled accounts.
-- Added cooldown filtering.
-- Added unavailable-model filtering.
-- Added explicit model filtering.
-- Added capability-aware filtering from request capabilities.
-- Added task-to-capability mapping for vision and structured output tasks.
-- Added priority routing.
-- Added round-robin routing.
-- Added least-recently-used routing.
-- Added lowest-utilization routing.
-- Added fastest routing hook.
-- Added cheapest routing.
-- Added deterministic ranking through a numeric routing score.
-- Exported routing APIs from `src/index.ts`.
-- Added routing tests covering eligibility, priority, round robin and candidate generation.
-
-### Routing flow
-
-```text
-Generate Request
-      |
-      v
-Candidate Generation
-      |
-      +--> account enabled?
-      +--> account healthy?
-      +--> cooldown expired?
-      +--> model available?
-      +--> model requested?
-      +--> capabilities compatible?
-      |
-      v
-Strategy Scoring
-      |
-      v
-Selected Account + Model + Adapter
-```
-
-### Exit criteria
-
-- Disabled/unhealthy/cooling-down capacity is excluded. **Complete.**
-- Capability-incompatible models are excluded. **Complete.**
-- Configurable routing strategy exists. **Complete.**
-- Provider-specific branches are absent from application-facing routing. **Complete.**
-- Selection does not expose credentials. **Complete.**
-- Deterministic routing tests exist. **Complete.**
-- CI build and test verification. **Pending.**
-
-### Phase note
-
-Rate-limit-aware capacity accounting, distributed state, retry/fallback and health transitions are deliberately deferred to Phases 6–10. The router currently consumes the `AccountState` supplied to it rather than owning distributed capacity state.
+- Provider-neutral `ModelRouter`.
+- Candidate generation.
+- Account/model eligibility filtering.
+- Capability-aware selection.
+- Health and cooldown filtering.
+- Priority, round-robin, LRU, utilization, fastest and cheapest strategy hooks.
+- Deterministic routing tests.
 
 ---
 
 # Phase 6 — Rate-Limit & Quota Management
 
-**Status:** Planned
+**Status:** Implemented — CI verification pending
 
 ### Goals
 
-Respect provider limits while making efficient use of legitimately configured accounts.
+Respect configured provider limits and normalize rate-limit signals without attempting to bypass provider restrictions.
 
-### Tasks
+### Completed
 
-- Normalize rate-limit information.
-- Parse `Retry-After`.
-- Parse provider-specific rate-limit headers.
-- Track RPM.
-- Track RPD.
-- Track TPM.
-- Track TPD.
-- Track remaining quota where exposed.
-- Track quota reset time where exposed.
-- Implement cooldowns.
-- Implement bounded retry scheduling.
-- Prevent unnecessary retries.
-- Prevent account rotation for quota/rate-limit circumvention.
+- Added `src/limits.ts` with `RateLimitTracker`.
+- RPM enforcement.
+- RPD enforcement.
+- TPM enforcement.
+- TPD enforcement.
+- Minute and daily rolling windows.
+- Request/token accounting per account.
+- `Retry-After` parsing for seconds and HTTP-date values.
+- Common `X-RateLimit-*` header parsing.
+- Account cooldown tracking after rate-limit responses.
+- Rate-limited state merge helper.
+- Public export through `src/index.ts`.
+- Unit tests for RPM/TPM, RPD, cooldowns and header parsing.
+
+### Rate-limit flow
+
+```text
+Provider Response
+      |
+      +--> Rate-limit headers
+      +--> Retry-After
+      |
+      v
+RateLimitTracker
+      |
+      +--> record request/tokens
+      +--> enforce RPM/RPD
+      +--> enforce TPM/TPD
+      +--> calculate cooldown
+      |
+      v
+Routing eligibility
+```
 
 ### Important constraint
 
@@ -219,7 +161,17 @@ Multiple accounts may be used for legitimate separation such as projects, organi
 
 ### Exit criteria
 
-The gateway respects known provider limits and returns a clear error when no eligible capacity remains.
+- RPM/RPD limits are enforced. **Complete.**
+- TPM/TPD limits are enforced. **Complete.**
+- Provider `Retry-After` information can create cooldown state. **Complete.**
+- Common rate-limit headers can be normalized. **Complete.**
+- Account capacity can be checked before routing. **Complete.**
+- Rate-limit tracking does not rotate accounts as a quota-bypass mechanism. **Complete.**
+- CI build and test verification. **Pending.**
+
+### Phase note
+
+Distributed atomic counters and cross-worker quota coordination belong to Phase 8. Retry scheduling and provider fallback belong to Phase 7. This phase deliberately provides the local rate-limit/quota boundary those phases will consume.
 
 ---
 
@@ -239,7 +191,7 @@ Make failures recoverable without creating retry storms or incorrect fallbacks.
 
 ### Goals
 
-Make account selection safe when multiple workers issue requests concurrently.
+Make account selection and quota state safe when multiple workers issue requests concurrently.
 
 ---
 
@@ -357,7 +309,7 @@ Phase 4  Model / capability discovery       [IMPLEMENTED]
    |
 Phase 5  Routing engine                     [IMPLEMENTED]
    |
-Phase 6  Rate limits / quotas
+Phase 6  Rate limits / quotas               [IMPLEMENTED]
    |
 Phase 7  Retry / fallback
    |
