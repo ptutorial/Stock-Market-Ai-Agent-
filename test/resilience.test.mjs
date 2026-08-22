@@ -1,0 +1,49 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { request, readJson } from '../dist/providers/http.js';
+
+test('provider request enforces timeout and normalizes timeout failures', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (_url, options) => new Promise((_, reject) => {
+    options.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+  });
+  try {
+    await assert.rejects(
+      () => request('https://provider.example/v1/generate', { timeoutMs: 10 }),
+      (error) => error.category === 'TimeoutError' && error.retryable === true && /10ms/.test(error.message),
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('provider requests explicitly reject redirects', async () => {
+  const original = globalThis.fetch;
+  let captured;
+  globalThis.fetch = async (_url, options) => {
+    captured = options;
+    throw new TypeError('redirect rejected');
+  };
+  try {
+    await assert.rejects(
+      () => request('https://provider.example/v1/generate', { headers: { authorization: 'Bearer secret-value' } }),
+      (error) => error.category === 'ProviderUnavailableError' && !String(error.message).includes('secret-value'),
+    );
+    assert.equal(captured.redirect, 'error');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('provider error bodies are bounded and do not leak credentials', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: 'secret-value '.repeat(1000) }), { status: 500 });
+  try {
+    await assert.rejects(
+      () => request('https://provider.example/v1/generate').then(readJson),
+      (error) => error.category === 'ServerError' && !String(error.message).includes('secret-value'),
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
