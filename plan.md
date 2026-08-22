@@ -2,9 +2,7 @@
 
 ## Purpose
 
-This document is the phased implementation roadmap for the multi-provider cloud LLM gateway described in the original specification.
-
-The project should be implemented incrementally. Each phase must leave the repository in a buildable and testable state before the next phase begins.
+This document is the phased implementation roadmap for the multi-provider cloud LLM gateway. Each phase is implemented independently and verified before the next phase is started.
 
 ## Target Architecture
 
@@ -15,6 +13,7 @@ Application
 LLM Gateway
     |
     +--> Request / Capability Resolver
+    +--> Model Registry / Discovery
     +--> Model Router
     +--> Account Selector
     +--> Retry / Backoff
@@ -43,74 +42,11 @@ The application must not contain provider-specific branching.
 
 **Status:** Complete
 
-### Goals
-
-- Establish the TypeScript project.
-- Define the provider-neutral architecture.
-- Add initial gateway interfaces and implementation.
-- Add CI and basic tests.
-- Document architectural decisions.
-
-### Deliverables
-
-- `package.json`
-- `tsconfig.json`
-- `src/types.ts`
-- `src/errors.ts`
-- `src/gateway.ts`
-- Provider adapter interfaces.
-- Initial provider adapters.
-- Unit-test foundation.
-- GitHub Actions CI.
-- `docs/architecture.md`.
-
-### Exit criteria
-
-- TypeScript project builds.
-- Tests execute through the configured test command.
-- No provider-specific logic exists in application-facing code.
-
 ---
 
 # Phase 1 — Core Domain Model & Contracts
 
 **Status:** Complete
-
-### Goals
-
-Make the gateway contracts precise enough that providers can be implemented independently.
-
-### Completed
-
-- Finalized provider-neutral domain types in `src/domain.ts`.
-- Finalized `ProviderAdapter` contract around `ModelInfo` rather than raw model strings.
-- Defined `AccountConfig`, `AccountLimits`, `AccountState`, and explicit `AccountHealth`.
-- Defined request/response and streaming contracts.
-- Defined task, capability, routing, usage, model and cost metadata types.
-- Aligned gateway selection and provider adapter calls with the domain contracts.
-- Exported the domain contract from the public package entry point.
-- Preserved normalized error categories and credential abstraction.
-
-### Required capabilities
-
-- Chat completion.
-- Streaming.
-- Structured output.
-- Tool/function calling.
-- Model discovery.
-- Token usage.
-- Health checks.
-
-### Exit criteria
-
-- Contracts are provider-neutral. **Complete.**
-- Adapters can be implemented without changing gateway contracts. **Complete.**
-- TypeScript compilation passes. **Pending CI verification.**
-- Contract tests exist for the interfaces. **Pending dedicated contract-test suite.**
-
-### Phase note
-
-The repository now has the Phase 1 domain boundary, but the provider adapters still need to be fully migrated to these contracts. That work belongs to Phase 3 and should not be mixed into Phase 1.
 
 ---
 
@@ -118,121 +54,92 @@ The repository now has the Phase 1 domain boundary, but the provider adapters st
 
 **Status:** Complete
 
-### Goals
-
-Create secure externalized configuration for providers, accounts, models and credentials.
-
-### Completed
-
-- Added `src/config.ts` with versioned gateway configuration contracts.
-- Added startup configuration validation for providers, accounts, models, capabilities, limits, priorities and unique account IDs.
-- Added environment-backed credential resolution through `EnvironmentCredentialStore`.
-- Added `LLM_GATEWAY_CONFIG` JSON loading with validation.
-- Added `config/gateway.example.json` containing non-secret account/provider configuration.
-- Added `.env.example` containing credential variable names only.
-- Exported configuration helpers from `src/index.ts`.
-- Added `docs/configuration.md` covering credential references, validation and secret-handling rules.
-- Kept real credentials out of committed configuration.
-
-### Configuration hierarchy
-
-```text
-Provider
-  -> Account
-      -> Credential Reference
-      -> Models
-      -> Capabilities
-      -> Priority
-      -> Limits
-      -> Routing metadata
-```
-
-### Exit criteria
-
-- Invalid configuration fails fast with useful errors. **Complete.**
-- No plaintext secret is committed. **Complete.**
-- Credential references, not credentials, appear in runtime configuration. **Complete.**
-- Configuration helpers are exported through the package API. **Complete.**
-- Automated compilation/test verification. **Pending CI verification.**
-
-### Phase note
-
-Provider-specific adapter migration remains intentionally deferred to Phase 3.
-
 ---
 
 # Phase 3 — Provider Adapter SDK
 
-**Status:** Planned
+**Status:** Implemented — CI verification pending
 
-### Goals
+### Completed
 
-Create a clean adapter boundary so every provider follows the same lifecycle.
-
-### Tasks
-
-- Implement common adapter base utilities.
-- Implement HTTP client abstraction.
-- Implement request timeout handling.
-- Implement response parsing.
-- Implement streaming parsing.
-- Implement capability reporting.
-- Implement model discovery hooks.
-- Implement usage extraction.
-- Implement error normalization.
-- Implement rate-limit metadata extraction.
-- Implement health-check hooks.
-
-### Provider adapters
-
-Implement independently in this order:
-
-1. Gemini.
-2. Groq.
-3. OpenRouter.
-4. Cloudflare Workers AI.
+- Common HTTP transport abstraction.
+- Request timeout and abort handling.
+- SSE stream parsing.
+- Normalized HTTP/provider errors.
+- Retry-After extraction.
+- Gemini adapter implementation.
+- Groq/OpenRouter OpenAI-compatible adapter implementation.
+- Cloudflare Workers AI adapter implementation.
+- Completion and streaming support where provider capabilities allow it.
+- Tool/function calling support where supported by the adapter contract.
+- Usage extraction.
+- Model discovery hooks.
+- Health-check hooks.
+- Provider adapter tests using mocked `fetch`.
 
 ### Exit criteria
 
-Each adapter can:
-
-- Authenticate securely.
-- Generate a completion.
-- Stream where supported.
-- Report capabilities.
-- Report model information.
-- Return normalized usage.
-- Return normalized errors.
-- Be mocked without real network calls.
+- Authenticate securely. **Implemented.**
+- Generate a completion. **Implemented.**
+- Stream where supported. **Implemented.**
+- Report capabilities/model information. **Implemented.**
+- Return normalized usage/errors. **Implemented.**
+- Be mocked without real network calls. **Implemented.**
+- CI build and test verification. **Pending.**
 
 ---
 
 # Phase 4 — Model & Capability Discovery
 
-**Status:** Planned
+**Status:** Implemented — CI verification pending
 
 ### Goals
 
-Stop assuming that every model supports every feature.
+Stop assuming that every model supports every feature and provide a reusable model metadata/cache boundary for routing.
 
-### Tasks
+### Completed
 
-- Discover provider models where APIs support discovery.
-- Add static metadata fallback where discovery is unavailable.
-- Normalize model identifiers.
-- Track model capabilities.
-- Track context limits where available.
-- Track structured-output support.
-- Track tool-calling support.
-- Track streaming support.
-- Track vision support.
-- Track model availability.
-- Cache discovery results with expiration.
-- Refresh metadata periodically.
+- Added `ModelRegistry` in `src/model-registry.ts`.
+- Added provider adapter discovery integration through the registry.
+- Added TTL-based discovery caching.
+- Added forced refresh support.
+- Added explicit cache invalidation.
+- Normalized discovered provider/model metadata.
+- Intersected discovered capabilities with the account's configured capabilities.
+- Preserved model availability metadata.
+- Added account identity to normalized model metadata.
+- Exported `ModelRegistry` from the public package API.
+- Added unit tests for cache reuse, forced refresh, invalidation and capability filtering.
+
+### Discovery model
+
+```text
+Provider Adapter
+      |
+      v
+ModelRegistry
+      |
+      +--> Discover models
+      +--> Normalize metadata
+      +--> Cache with TTL
+      +--> Refresh / invalidate
+      |
+      v
+Routing Engine
+```
 
 ### Exit criteria
 
-A request requiring a capability is never routed to an incompatible model.
+- Provider model discovery is available through a common registry. **Complete.**
+- Static/account model metadata remains usable when provider discovery is limited. **Complete.**
+- Model capabilities are represented by `ModelInfo`. **Complete.**
+- Cached discovery avoids unnecessary provider calls. **Complete.**
+- Capability filtering cannot add capabilities that the account does not permit. **Complete.**
+- CI build and test verification. **Pending.**
+
+### Phase note
+
+The registry is intentionally introduced as a standalone component. Full routing integration and advanced capability-aware selection belong to Phase 5.
 
 ---
 
@@ -631,12 +538,7 @@ const result = await gateway.generate('coding', prompt, {
 });
 ```
 
-Application code must not need:
-
-```ts
-if (provider === 'gemini') {}
-if (provider === 'groq') {}
-```
+Application code must not need provider-specific branches.
 
 ---
 
@@ -648,30 +550,6 @@ if (provider === 'groq') {}
 
 Expose the gateway as a standalone internal service when multiple applications need to share it.
 
-### Potential architecture
-
-```text
-Application A --\\
-Application B ----> LLM Gateway Service ---> Providers
-Application C --/
-```
-
-### Tasks
-
-- HTTP API.
-- Authentication/authorization.
-- Request validation.
-- Streaming HTTP/SSE.
-- Health endpoint.
-- Metrics endpoint.
-- Usage endpoint.
-- Rate limiting at gateway level.
-- Request IDs.
-- Docker image.
-- Production deployment configuration.
-
-Do not build this phase until the core library is stable.
-
 ---
 
 # Phase 16 — Redis & Production Scaling
@@ -682,21 +560,6 @@ Do not build this phase until the core library is stable.
 
 Support multiple gateway instances safely.
 
-### Tasks
-
-- Redis state store.
-- Distributed locks/reservations.
-- Shared rate-limit state.
-- Shared cooldown state.
-- Shared account health.
-- Distributed routing state.
-- Horizontal scaling tests.
-- Failure recovery tests.
-
-### Exit criteria
-
-Multiple gateway instances can safely share provider/account capacity state.
-
 ---
 
 # Phase 17 — Additional Providers
@@ -705,38 +568,11 @@ Multiple gateway instances can safely share provider/account capacity state.
 
 Add providers only through the adapter contract.
 
-Potential providers:
-
-- Mistral.
-- Cerebras.
-- Together AI.
-- Fireworks AI.
-- Hugging Face.
-- NVIDIA NIM.
-- Other legitimate providers.
-
-Adding a provider must not require changes to application business logic.
-
 ---
 
 # Phase 18 — Production Readiness Review
 
 **Status:** Future
-
-### Review areas
-
-- Architecture.
-- Reliability.
-- Security.
-- Concurrency.
-- Provider compatibility.
-- Rate-limit correctness.
-- Cost correctness.
-- Observability.
-- Testing.
-- Documentation.
-- Deployment.
-- Disaster recovery.
 
 ### Required final checks
 
@@ -755,8 +591,6 @@ Adding a provider must not require changes to application business logic.
 
 # Implementation Order
 
-The recommended execution sequence is:
-
 ```text
 Phase 0  Foundation                         [DONE]
    |
@@ -764,9 +598,9 @@ Phase 1  Core contracts                     [DONE]
    |
 Phase 2  Configuration / credentials        [DONE]
    |
-Phase 3  Provider adapter SDK
+Phase 3  Provider adapter SDK               [IMPLEMENTED]
    |
-Phase 4  Model / capability discovery
+Phase 4  Model / capability discovery       [IMPLEMENTED]
    |
 Phase 5  Routing engine
    |
