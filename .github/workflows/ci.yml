@@ -10,12 +10,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
-      - run: npm run build
-      - run: npm test
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests with detailed failure output
+        run: |
+          set -o pipefail
+          node --test --test-reporter=tap test/*.test.mjs 2>&1 | tee test-output.log
+
+      - name: Print failed test diagnostics
+        if: failure()
+        run: |
+          echo "===== FAILED TESTS ====="
+          grep -n -B 8 -A 35 -E '^not ok |failureType:|AssertionError|ERR_ASSERTION|error: ' test-output.log || true
+          echo "===== TEST SUMMARY ====="
+          grep -E '^1\.\.|^# tests |^# pass |^# fail |^# skipped |^# cancelled ' test-output.log || true
+
+      - name: Upload test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-failure-output
+          path: test-output.log
+          retention-days: 7
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
