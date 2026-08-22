@@ -4,6 +4,7 @@ export interface RoutingRequest {
   task?: TaskType;
   capabilities?: Capability[];
   model?: string;
+  providerOrder?: string[];
 }
 
 export interface RouterOptions {
@@ -36,9 +37,23 @@ export class ModelRouter {
       const rotated = [...eligible.slice(offset), ...eligible.slice(0, offset)];
       return rotated.map((candidate, index) => ({ ...candidate, score: -index }));
     }
+
+    const providerRank = new Map((request.providerOrder ?? []).map((provider, index) => [provider, index]));
     return eligible
-      .map((candidate) => ({ ...candidate, score: this.score(candidate) }))
-      .sort((a, b) => b.score - a.score);
+      .map((candidate, index) => ({
+        candidate,
+        index,
+        score: this.score(candidate),
+        providerIndex: providerRank.get(candidate.account.provider) ?? Number.MAX_SAFE_INTEGER,
+      }))
+      .sort((a, b) => {
+        const scoreDelta = b.score - a.score;
+        if (Math.abs(scoreDelta) > 1e-9) return scoreDelta;
+        const providerDelta = a.providerIndex - b.providerIndex;
+        if (providerDelta !== 0) return providerDelta;
+        return a.index - b.index;
+      })
+      .map(({ candidate, score }) => ({ ...candidate, score }));
   }
 
   private isEligible(candidate: RoutingCandidate, request: RoutingRequest): boolean {
@@ -73,11 +88,11 @@ export class ModelRouter {
     const outputCost = model.outputCostPerMillion ?? account.costPerMillionOutput ?? 0;
     switch (this.strategy) {
       case 'cheapest': return -(inputCost + outputCost) + priority * 0.01 - failures;
-      case 'lowest_utilization': return (1 - utilization) * 100 + priority - failures;
-      case 'fastest': return (Number.isFinite(latency) && latency > 0 ? 100_000 / latency : 0) + priority - failures;
+      case 'lowest_utilization': return (1 - utilization) * 100 + priority * 0.01 - failures;
+      case 'fastest': return (Number.isFinite(latency) && latency > 0 ? 100_000 / latency : 0) + priority * 0.01 - failures;
       case 'least_recently_used': {
         const idleMs = state.lastUsedAt ? Math.max(0, this.clock() - state.lastUsedAt) : Number.MAX_SAFE_INTEGER;
-        return Math.min(100_000, idleMs / 1_000) + priority - failures;
+        return Math.min(100_000, idleMs / 1_000) + priority * 0.01 - failures;
       }
       default: return priority - failures;
     }
