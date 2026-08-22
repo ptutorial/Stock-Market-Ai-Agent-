@@ -32,13 +32,14 @@ export class AtomicRedisStateStore implements StateStore {
       `${this.prefix}:quota:${accountId}:m:${minute}:tokens`,
       `${this.prefix}:quota:${accountId}:d:${day}:requests`,
       `${this.prefix}:quota:${accountId}:d:${day}:tokens`,
+      `${this.prefix}:state:${accountId}`,
     ];
     const script = `
 local mr = redis.call('GET', KEYS[1]) or 0
 local mt = redis.call('GET', KEYS[2]) or 0
 local dr = redis.call('GET', KEYS[3]) or 0
 local dt = redis.call('GET', KEYS[4]) or 0
-local rpm = tonumber(ARGV[1]); local rpd = tonumber(ARGV[2]); local tpm = tonumber(ARGV[3]); local tpd = tonumber(ARGV[4]); local tokens = tonumber(ARGV[5])
+local rpm = tonumber(ARGV[1]); local rpd = tonumber(ARGV[2]); local tpm = tonumber(ARGV[3]); local tpd = tonumber(ARGV[4]); local tokens = tonumber(ARGV[5]); local now = tonumber(ARGV[6])
 if rpm >= 0 and tonumber(mr) + 1 > rpm then return 0 end
 if rpd >= 0 and tonumber(dr) + 1 > rpd then return 0 end
 if tpm >= 0 and tonumber(mt) + tokens > tpm then return 0 end
@@ -51,8 +52,15 @@ redis.call('EXPIRE', KEYS[1], 61)
 redis.call('EXPIRE', KEYS[2], 61)
 redis.call('EXPIRE', KEYS[3], 86401)
 redis.call('EXPIRE', KEYS[4], 86401)
+local raw = redis.call('GET', KEYS[5])
+local state
+if raw then state = cjson.decode(raw) else state = {requests=0,tokens=0,failures=0,health='healthy'} end
+state.requests = (state.requests or 0) + 1
+state.tokens = (state.tokens or 0) + tokens
+state.lastUsedAt = now
+redis.call('SET', KEYS[5], cjson.encode(state))
 return 1`;
-    const value = await this.redis.eval(script, keys.length, ...keys, String(limits.rpm ?? -1), String(limits.rpd ?? -1), String(limits.tpm ?? -1), String(limits.tpd ?? -1), String(tokens));
+    const value = await this.redis.eval(script, keys.length, ...keys, String(limits.rpm ?? -1), String(limits.rpd ?? -1), String(limits.tpm ?? -1), String(limits.tpd ?? -1), String(tokens), String(now));
     return Number(value) === 1;
   }
 }
