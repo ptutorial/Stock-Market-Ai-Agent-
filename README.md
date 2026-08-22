@@ -1,12 +1,10 @@
 # Multi-Provider LLM Gateway
 
-A production-oriented, provider-agnostic TypeScript gateway for applications that need to route LLM workloads across multiple providers and multiple legitimate API accounts without putting provider-specific logic into application code.
+A production-oriented, provider-agnostic TypeScript gateway for routing LLM workloads across multiple providers and multiple legitimate API accounts without coupling application code to provider-specific APIs.
 
-The gateway provides a common abstraction for generation and streaming, capability-aware routing, account selection, retries and fallback, health state, rate-limit/quota controls, usage accounting, observability, security boundaries, a developer SDK, an HTTP API, and an atomic Redis state implementation for multi-instance deployments.
+The gateway provides a common abstraction for generation and streaming, capability-aware routing, account selection, retries and fallback, health state, rate-limit/quota controls, usage and cost accounting, observability, security boundaries, a developer SDK, an HTTP API, and atomic Redis state for multi-instance deployments.
 
-> **Status:** Production-candidate architecture. The repository has a green CI build/test pipeline, but live provider, Redis, load, container-security, and deployment smoke tests still need to be performed before calling a deployment production-certified.
-
----
+> **Status:** Production-candidate architecture. Build and CI are green, and Batch E load/Redis certification is being executed incrementally. A production deployment should still complete live-provider contract tests, container/security scanning, deployment smoke tests, and the remaining Batch E evidence checks in the target environment.
 
 ## Contents
 
@@ -25,28 +23,27 @@ The gateway provides a common abstraction for generation and streaming, capabili
 - [Health and observability](#health-and-observability)
 - [Developer SDK](#developer-sdk)
 - [HTTP API](#http-api)
+- [Swagger / OpenAPI](#swagger--openapi)
+- [Environment configuration](#environment-configuration)
 - [Running locally](#running-locally)
 - [Docker](#docker)
+- [Load and production certification](#load-and-production-certification)
 - [Testing and CI](#testing-and-ci)
 - [Project structure](#project-structure)
-- [Phased implementation](#phased-implementation)
 - [Security model](#security-model)
 - [Production-readiness checklist](#production-readiness-checklist)
-- [Design principles](#design-principles)
-
----
 
 ## Why this gateway
 
-Calling one LLM provider directly couples application code to that provider's API, authentication model, errors, limits, model names, streaming format, and availability characteristics.
+Calling one LLM provider directly couples application code to that provider's authentication model, errors, limits, model names, streaming format, and availability characteristics.
 
-This project puts a stable gateway boundary between the application and providers:
+This project puts a stable gateway boundary between application and providers:
 
 ```text
 Application
     |
     v
-LLM Gateway API
+Gateway SDK / HTTP API
     |
     +--> capability matching
     +--> account selection
@@ -62,88 +59,21 @@ Provider Adapter
 Provider API / Model
 ```
 
-The application therefore asks for a task and prompt instead of implementing provider-specific branches such as `if provider === ...` throughout its business logic.
-
----
+Applications request a task and prompt rather than implementing provider-specific branches throughout their business logic.
 
 ## Core capabilities
 
-### Provider abstraction
-
-Providers implement a common `ProviderAdapter` contract for:
-
-- text generation
-- streaming
-- model discovery
-- health checks
-- normalized gateway results
-
-### Multiple legitimate accounts
-
-A provider can have multiple configured accounts. The gateway can select among eligible accounts while respecting their configured limits and health state.
-
-### Capability-aware routing
-
-Routing can consider capabilities such as:
-
-- chat
-- streaming
-- structured output
-- tool calling
-- vision
-
-### Routing strategies
-
-The domain currently defines:
-
-- `priority`
-- `round_robin`
-- `least_recently_used`
-- `lowest_utilization`
-- `fastest`
-- `cheapest`
-
-### Reliability controls
-
-The gateway supports bounded retries, cooldowns, normalized failures, and provider fallback. Fallback remains capability-aware rather than blindly switching providers.
-
-### Rate-limit and quota controls
-
-Account-level limits can represent:
-
-- RPM — requests per minute
-- RPD — requests per day
-- TPM — tokens per minute
-- TPD — tokens per day
-
-### Usage and cost tracking
-
-Gateway results carry normalized usage information including input tokens, output tokens, total tokens, and optional estimated cost/currency data.
-
-### Health state
-
-Account health can be represented as:
-
-- `healthy`
-- `degraded`
-- `rate_limited`
-- `authentication_failure`
-- `temporarily_unavailable`
-- `disabled`
-
-### HTTP boundary
-
-The service layer provides a provider-neutral `POST /v1/generate` endpoint with request validation, optional Bearer authentication, request IDs, payload-size protection, and normalized HTTP errors.
-
-### Redis-backed distributed state
-
-`AtomicRedisStateStore` uses a Redis Lua `EVAL` operation to make quota checks and increments atomic. This is intended for multiple gateway instances sharing quota state.
-
----
+- Provider abstraction for generation, streaming, model discovery, health checks, and normalized results.
+- Multiple independently configured accounts per provider.
+- Capability-aware routing for chat, streaming, structured output, tool calling, and vision.
+- Routing strategies: `priority`, `round_robin`, `least_recently_used`, `lowest_utilization`, `fastest`, `cheapest`.
+- Bounded retries, exponential backoff, cooldowns, health transitions, and capability-aware fallback.
+- RPM, RPD, TPM, and TPD quota controls.
+- Normalized usage and estimated cost accounting.
+- Provider-neutral HTTP API with authentication, request IDs, payload limits, and normalized errors.
+- Atomic Redis state for horizontally scaled deployments.
 
 ## Supported providers
-
-The current domain/provider implementation includes:
 
 | Provider | Adapter | Status |
 |---|---|---|
@@ -152,11 +82,7 @@ The current domain/provider implementation includes:
 | OpenRouter | `OpenRouterAdapter` | Implemented |
 | Cloudflare Workers AI | `CloudflareWorkersAIAdapter` | Implemented |
 
-The architecture is designed so additional providers can be introduced through adapters without changing application-level routing logic.
-
-Provider-specific credentials are supplied through credential references rather than being embedded in application telemetry or gateway responses.
-
----
+Additional providers can be introduced through the adapter contract without changing application-level routing logic.
 
 ## Architecture
 
@@ -169,13 +95,12 @@ Provider-specific credentials are supplied through credential references rather 
                                     |
                                     v
                          +----------------------+
-                         |   GatewayClient /    |
-                         |      HTTP API        |
+                         | GatewayClient / HTTP |
                          +----------+-----------+
                                     |
                                     v
                          +----------------------+
-                         |     LLMGateway       |
+                         |      LLMGateway       |
                          +----------+-----------+
                                     |
              +----------------------+----------------------+
@@ -195,8 +120,6 @@ Provider-specific credentials are supplied through credential references rather 
                   |                 |                 |
                   v                 v                 v
                Gemini             Groq          OpenRouter / CF
-                  |                 |                 |
-                  +-----------------+-----------------+
                                     |
                                     v
                               External APIs
@@ -205,85 +128,27 @@ Provider-specific credentials are supplied through credential references rather 
                               Redis
 ```
 
-The core gateway is provider-neutral. Provider adapters own translation to external provider APIs.
-
-See [`docs/architecture.md`](docs/architecture.md) for the detailed architecture documentation.
-
----
+See [`docs/architecture.md`](docs/architecture.md) for detailed architecture documentation.
 
 ## Request lifecycle
 
-A normal generation request follows this conceptual path:
-
-```text
-1. Application submits task + prompt + options
-2. Gateway validates the request
-3. Capability requirements are determined
-4. Eligible accounts/models are discovered or selected
-5. Disabled/unhealthy/ineligible candidates are excluded
-6. Rate-limit/quota policy is evaluated
-7. Routing strategy scores/selects a candidate
-8. Credential reference is resolved
-9. Provider adapter executes the request
-10. Result is normalized
-11. Usage/cost state is recorded
-12. Health state is updated
-13. Response is returned to the application
-```
-
-If a provider failure is retryable, the gateway can retry within its configured bounds. If fallback is allowed and another eligible candidate exists, the request can move to the next provider/account.
-
----
-
-## Routing strategies
-
-The routing layer supports multiple selection policies.
-
-| Strategy | Purpose |
-|---|---|
-| `priority` | Prefer explicitly higher-priority accounts/providers |
-| `round_robin` | Distribute eligible requests across candidates |
-| `least_recently_used` | Prefer candidates used least recently |
-| `lowest_utilization` | Prefer candidates with lower observed utilization |
-| `fastest` | Prefer candidates based on observed latency/health information |
-| `cheapest` | Prefer candidates with lower configured cost |
-
-Routing is constrained by capability, account configuration, health, and limits. A strategy does not override those eligibility rules.
-
----
-
-## Capabilities and tasks
-
-### Capabilities
-
-```ts
-'chat'
-'streaming'
-'structured_output'
-'tool_calling'
-'vision'
-```
-
-### Tasks
-
-```ts
-'coding'
-'general'
-'reasoning'
-'fast'
-'cheap'
-'long_context'
-'vision'
-'structured_output'
-```
-
-Generation options can additionally specify a model, capability requirements, temperature, maximum tokens, tools, JSON schema, and an `AbortSignal`.
-
----
+1. Application submits task, prompt, and options.
+2. Gateway validates the request.
+3. Capability requirements are determined.
+4. Eligible accounts/models are selected.
+5. Disabled, unhealthy, incompatible, or cooling-down candidates are excluded.
+6. Quota/rate-limit policy is evaluated.
+7. Routing strategy selects a candidate.
+8. Credential reference is resolved.
+9. Provider adapter executes the request.
+10. Provider result is normalized.
+11. Usage and cost state is recorded.
+12. Health state is updated.
+13. Response is returned.
 
 ## Accounts and credentials
 
-An account is represented by an `AccountConfig` similar to:
+Example account configuration:
 
 ```ts
 const account = {
@@ -294,42 +159,23 @@ const account = {
   capabilities: ['chat', 'streaming'],
   priority: 10,
   enabled: true,
-  limits: {
-    rpm: 60,
-    rpd: 10000,
-    tpm: 100000,
-    tpd: 1000000,
-  },
+  limits: { rpm: 60, rpd: 10000, tpm: 100000, tpd: 1000000 },
   costPerMillionInput: 0,
   costPerMillionOutput: 0,
 };
 ```
 
-`credentialRef` identifies how the credential should be resolved. The application should not place raw provider API keys into source code, logs, telemetry, configuration committed to Git, or README examples.
+For multiple accounts of the same provider, configure separate account IDs and credential references. The routing layer then treats them as independently eligible candidates while applying health and quota policy.
 
-The gateway architecture deliberately separates credential resolution from provider execution.
-
----
+Multiple accounts are intended for legitimate, independently authorized provider accounts and must not be used to bypass provider limits or terms.
 
 ## Retries, cooldowns and fallback
 
-Provider failures are normalized so the gateway can make reliability decisions without exposing provider-specific error handling throughout the application.
+Provider failures are normalized so reliability decisions remain provider-neutral. Controls include bounded retry count, exponential backoff, `Retry-After` handling, cooldown periods, health transitions, provider/account fallback, and capability-aware candidate selection.
 
-Controls include:
-
-- bounded retry count
-- cooldown periods after failures/rate limits
-- health transitions
-- provider/account fallback
-- capability-aware candidate selection
-
-The gateway must not use retries or account rotation to bypass a provider's quota, rate limit, terms, or access controls. Multiple accounts are intended for legitimate accounts and independently permitted usage.
-
----
+Authentication failures are not treated as ordinary retryable failures.
 
 ## Rate limits and quotas
-
-The gateway models account limits as:
 
 ```ts
 interface AccountLimits {
@@ -340,15 +186,9 @@ interface AccountLimits {
 }
 ```
 
-For a single process, state can be maintained through the configured state store. For multiple gateway instances, `AtomicRedisStateStore` provides atomic quota reservation using Redis Lua execution.
-
-The Redis implementation creates minute/day request and token buckets with expiration so stale buckets are automatically removed.
-
----
+`AtomicRedisStateStore` performs quota checks and increments atomically using Redis Lua execution. Quota failures are designed to fail closed rather than silently bypass distributed limits.
 
 ## Redis and multi-instance scaling
-
-For a horizontally scaled deployment:
 
 ```text
               Load Balancer
@@ -362,9 +202,9 @@ For a horizontally scaled deployment:
                  Redis
 ```
 
-`AtomicRedisStateStore.reserve()` performs the relevant quota checks and increments inside a single Redis Lua script. This avoids the classic distributed race where two gateway instances independently perform `GET`, check, and `INCR` operations.
+This prevents the distributed race where several gateway instances independently check and increment the same provider quota.
 
-Example conceptual usage:
+Example:
 
 ```ts
 const stateStore = new AtomicRedisStateStore(redisClient, 'llm-gateway');
@@ -376,13 +216,7 @@ const allowed = await stateStore.reserve(
 );
 ```
 
-A real deployment should use a production Redis client that supports `EVAL` and should include live Redis integration testing before release.
-
----
-
 ## Usage and cost accounting
-
-The normalized `Usage` structure supports:
 
 ```ts
 interface Usage {
@@ -394,31 +228,15 @@ interface Usage {
 }
 ```
 
-`GenerateResult` also identifies the selected provider, account, model, request ID, and latency.
-
-This provides the basis for:
-
-- per-provider usage reporting
-- per-account usage reporting
-- cost estimation
-- latency analysis
-- operational dashboards
-
----
+Normalized results identify provider, account, model, request ID, latency, usage, and optional estimated cost.
 
 ## Health and observability
 
-The gateway tracks account health and operational state so routing can avoid known unhealthy candidates.
+Account health states include `healthy`, `degraded`, `rate_limited`, `authentication_failure`, `temporarily_unavailable`, and `disabled`.
 
-The architecture also includes observability and usage boundaries for collecting normalized operational information without exposing provider credentials.
-
-Request IDs are generated or propagated at the HTTP boundary using `X-Request-Id` and are included in gateway results.
-
----
+The HTTP boundary validates or generates `X-Request-Id` and returns it with the response. Operational telemetry is normalized without exposing provider credentials.
 
 ## Developer SDK
-
-The SDK provides a high-level interface for applications that do not need to know about the gateway's internal routing implementation.
 
 ### Direct client
 
@@ -438,19 +256,13 @@ const client = new GatewayClient({
 const result = await client.generate({
   task: 'coding',
   prompt: 'Explain this function',
-  options: {
-    maxTokens: 1000,
-  },
+  options: { maxTokens: 1000 },
 });
-
-console.log(result.text);
 ```
 
 ### Fluent builder
 
 ```ts
-import { gatewayClient } from 'multi-provider-llm-gateway';
-
 const client = gatewayClient()
   .addAccount(account)
   .addAdapter(adapter)
@@ -463,32 +275,22 @@ const client = gatewayClient()
   .build();
 ```
 
-The builder validates that at least one account and one adapter exist and validates retry/cooldown values.
-
 ### Streaming
 
 ```ts
-const stream = client.stream({
-  task: 'general',
-  prompt: 'Write a short explanation of Redis.',
-});
-
-for await (const chunk of stream) {
-  process.stdout.write(chunk.text);
-}
+const stream = client.stream({ task: 'general', prompt: 'Explain Redis briefly.' });
+for await (const chunk of stream) process.stdout.write(chunk.text);
 ```
-
----
 
 ## HTTP API
 
-The provider-neutral HTTP layer exposes:
+| Method | Path | Purpose | Authentication |
+|---|---|---|---|
+| `GET` | `/health` | Liveness | None |
+| `GET` | `/ready` | Readiness and healthy-account count | None |
+| `POST` | `/v1/generate` | Generate an LLM response | Optional Bearer |
 
-```http
-POST /v1/generate
-```
-
-Example request:
+Example:
 
 ```http
 POST /v1/generate HTTP/1.1
@@ -499,69 +301,78 @@ X-Request-Id: request-123
 {
   "task": "general",
   "prompt": "Explain event-driven architecture",
-  "options": {
-    "maxTokens": 500
-  }
+  "options": { "maxTokens": 500 }
 }
 ```
 
-The endpoint supports:
+The HTTP layer provides method/request validation, optional constant-time Bearer API-key comparison, request IDs, a configurable body limit (default 1 MiB), and normalized `400`, `401`, `404`, `405`, `413`, `429`, and `502` responses.
 
-- method validation
-- request validation
-- optional Bearer authentication
-- request ID propagation/generation
-- configurable request body limit (default 1 MiB)
-- normalized `400`, `401`, `404`, `405`, `413`, and gateway-error responses
+## Swagger / OpenAPI
 
-The HTTP handler itself is framework-neutral and can be embedded in a Node.js HTTP runtime or adapted to another HTTP framework.
+The API is documented using **OpenAPI 3.0.3**.
 
----
+```text
+docs/
+├── openapi.yaml
+└── swagger-ui.html
+```
+
+- [OpenAPI specification](docs/openapi.yaml)
+- [Interactive Swagger UI](docs/swagger-ui.html)
+
+The Swagger UI loads the OpenAPI document and supports interactive Bearer authorization. The static page is documentation tooling and is not automatically exposed as a production route.
+
+When `src/http.ts` changes, update `docs/openapi.yaml` in the same change and update the HTTP contract tests.
+
+## Environment configuration
+
+```bash
+cp .env.example .env
+```
+
+Never commit real provider credentials or production `.env` files.
+
+Typical runtime configuration:
+
+```text
+NODE_ENV=production
+PORT=3000
+GATEWAY_API_KEY=<set-at-runtime>
+REDIS_URL=redis://localhost:6379
+GATEWAY_SHUTDOWN_TIMEOUT_MS=10000
+```
+
+Provider account credentials should be injected through the configured credential store/environment references.
 
 ## Running locally
 
 ### Requirements
 
-- Node.js 20+
+- Node.js **23.8.0** for the current project baseline
 - npm
-- Provider credentials for the providers you intend to exercise
-- Redis only when testing the distributed state implementation
+- Redis for distributed-state/load certification
+- Provider credentials for live provider tests
 
-### Install
+Install and build:
 
 ```bash
 npm install
-```
-
-### Build
-
-```bash
 npm run build
 ```
 
-### Test
+Run tests:
 
 ```bash
 npm test
 ```
 
-The repository's CI pipeline runs installation, TypeScript compilation, and the test suite.
-
----
-
 ## Docker
 
-The repository includes a multi-stage production-oriented Dockerfile.
-
-Build:
+The repository includes a production-oriented multi-stage Dockerfile.
 
 ```bash
 docker build -t multi-provider-llm-gateway:local .
 ```
-
-The build stage installs dependencies, copies the source/tests, and runs the test suite before the runtime image is created.
-
-Run:
 
 ```bash
 docker run --rm \
@@ -570,188 +381,160 @@ docker run --rm \
   multi-provider-llm-gateway:local
 ```
 
-The runtime container:
+The container is designed to run as a non-root user with production dependencies. Redis can be supplied as an external service for distributed state.
 
-- uses Node 20 Alpine
-- sets `NODE_ENV=production`
-- runs as the non-root `node` user
-- exposes port `3000`
-- receives the gateway API key at runtime
+## Load and production certification
 
-> The current standalone `src/server.ts` is a production-runtime skeleton. It intentionally does not invent provider credentials/configuration. A deployment must wire the actual account configuration, adapters, credential store, and usage/state dependencies before serving real provider traffic.
+Batch E defines the production load/concurrency certification track:
 
----
+| Phase | Certification | Command | Current evidence |
+|---|---|---|---|
+| E1 | Synthetic gateway load | `npm run load:test` | ✅ Passed |
+| E2 | Redis atomic quota concurrency | `npm run load:redis` | ✅ Passed |
+| E3 | Multi-instance shared quota | `npm run load:multi` | ⏳ Execute/retain evidence |
+| E4 | Sustained load | `npm run load:sustained` | ⏳ Execute/retain evidence |
+| E5 | Account fairness | `npm run load:fairness` | ⏳ Execute/retain evidence |
+| E6 | Failure/recovery under load | `npm run load:failure` | ⏳ Execute/retain evidence |
+| E7 | Certification evidence/report | `npm run certification:batch-e` | ⏳ Evidence gate |
+
+### E1 recorded result
+
+```text
+1,000 requests
+50 concurrency
+1,000 completed
+0 failed
+29,212 RPS
+p95 2.91 ms
+1,000 provider calls
+1,000 state requests
+```
+
+### E2 recorded result
+
+```text
+100 attempts
+RPM limit: 25
+Accepted: 25
+Rejected: 75
+Minute requests: 25
+Minute tokens: 25
+Day requests: 25
+Day tokens: 25
+```
+
+`npm run certification:batch-e` currently prints the certification checklist and acceptance criteria. E3-E6 must be executed and their JSON output retained as release evidence before declaring Batch E fully certified.
 
 ## Testing and CI
 
-The CI workflow currently performs:
+Useful commands:
 
-```text
-npm install
-    ↓
+```bash
 npm run build
-    ↓
 npm test
+npm run load:test
+npm run load:redis
+npm run load:multi
+npm run load:sustained
+npm run load:fairness
+npm run load:failure
+npm run certification:batch-e
 ```
 
-The project has been developed phase-by-phase with CI verification used as a gate before treating compiler/test failures as resolved.
-
-The test suite covers gateway contracts, SDK behavior, HTTP validation, Redis atomic reservation behavior, and other core components included in the repository.
-
-### Production verification still required
-
-A green unit/build CI pipeline does not by itself prove production readiness. Before a production deployment, run:
-
-- live Redis integration tests
-- live provider contract tests
-- container vulnerability scanning
-- load/concurrency testing
-- repository/history secret scanning
-- production deployment smoke tests
-
----
+CI gates changes on dependency installation, TypeScript compilation, tests, and the configured security/container checks. A green unit/build pipeline is necessary but not sufficient for production certification.
 
 ## Project structure
 
 ```text
 .
 ├── src/
-│   ├── domain.ts                 # Core domain contracts and types
-│   ├── gateway.ts                # Main gateway orchestration
-│   ├── sdk.ts                    # Developer-facing client and builder
-│   ├── http.ts                   # Provider-neutral HTTP handler
-│   ├── server.ts                 # Minimal Node HTTP runtime
-│   ├── redis.ts                  # Atomic Redis state implementation
-│   ├── state.ts                  # State-store abstraction
-│   ├── router.ts                 # Candidate selection/routing
-│   ├── limits.ts                 # Rate-limit/quota logic
-│   ├── retry.ts                  # Retry/failure behavior
-│   ├── health.ts                 # Account/provider health
-│   ├── usage.ts                  # Usage/accounting
-│   ├── observability.ts          # Operational telemetry boundary
-│   ├── security.ts               # Security-related helpers/boundaries
-│   ├── config.ts                 # Configuration handling
-│   ├── model-registry.ts         # Model/capability registry
+│   ├── domain.ts
+│   ├── gateway.ts
+│   ├── sdk.ts
+│   ├── http.ts
+│   ├── server.ts
+│   ├── redis.ts
+│   ├── state.ts
+│   ├── routing.ts
 │   └── providers/
-│       ├── gemini.ts
-│       ├── openai-compatible.ts
-│       └── cloudflare.ts
-├── test/                         # Automated tests
+├── scripts/
+│   ├── load-test.mjs
+│   ├── load-redis-test.mjs
+│   ├── load-multi-instance.mjs
+│   ├── load-sustained.mjs
+│   ├── load-fairness.mjs
+│   ├── load-failure-recovery.mjs
+│   └── production-certification.mjs
+├── test/
 ├── docs/
-│   └── architecture.md           # Detailed architecture
-├── .github/workflows/ci.yml      # CI pipeline
-├── Dockerfile                    # Production container build
-├── plan.md                       # Phase-by-phase implementation plan
+│   ├── openapi.yaml
+│   ├── swagger-ui.html
+│   └── architecture.md
+├── .github/workflows/
+├── Dockerfile
+├── docker-compose.yml
+├── .env.example
 ├── package.json
-└── tsconfig.json
+└── README.md
 ```
-
----
-
-## Phased implementation
-
-The project has been implemented incrementally rather than as one large change.
-
-| Phase | Area | Status |
-|---|---|---|
-| 0 | Repository foundation | Complete |
-| 1 | Core domain model/contracts | Complete |
-| 2 | Configuration/credentials | Complete |
-| 3 | Provider adapter SDK | Implemented |
-| 4 | Model/capability discovery | Implemented |
-| 5 | Routing engine | Implemented |
-| 6 | Rate limits/quotas | Implemented |
-| 7 | Retry/fallback | Implemented |
-| 8 | Concurrency/distributed state | Implemented |
-| 9 | Usage/cost accounting | Implemented |
-| 10 | Health monitoring | Implemented |
-| 11 | Observability | Implemented |
-| 12 | Security hardening | Implemented |
-| 13 | Comprehensive testing | Implemented |
-| 14 | Developer API/SDK | Implemented; CI green |
-| 15 | Service/API layer | Implemented |
-| 16 | Redis/production scaling | Implemented |
-| 17 | Additional providers | Future |
-| 18 | Production readiness baseline | Implemented; CI green |
-
-See [`plan.md`](plan.md) for the detailed phase definitions, exit criteria, and remaining production verification work.
-
----
 
 ## Security model
 
-Security is a first-class gateway boundary rather than provider-specific application logic.
+Security controls include credential separation, normalized authentication errors, outbound access controls, redirect protection, constant-time API-key comparison, request-size limits, request-ID validation, sanitized error metadata, fail-closed Redis quotas, and non-root Docker execution.
 
-### Credentials
+Never commit API keys, access tokens, private keys, provider secrets, production `.env` files, or Redis credentials.
 
-- Use credential references instead of raw secrets in gateway configuration where possible.
-- Supply runtime secrets through environment/secret-management mechanisms.
-- Do not commit API keys.
-- Do not return provider credentials through the HTTP API.
-- Do not log raw provider credentials.
-
-### Authentication
-
-The HTTP layer supports an optional Bearer API key. The standalone production server requires `GATEWAY_API_KEY` to be configured before startup.
-
-### Request protection
-
-The HTTP boundary includes request validation and a configurable body-size limit to reduce accidental or abusive oversized requests.
-
-### Quota integrity
-
-The gateway does not attempt to bypass provider quotas or rate limits. Account rotation is only an orchestration mechanism across legitimately configured accounts and must remain within each provider's permitted usage and terms.
-
----
+Multiple provider accounts are intended for legitimate accounts with independently permitted usage, not for bypassing quotas or provider access controls.
 
 ## Production-readiness checklist
 
-### Completed in the repository
+### Application
 
-- [x] Provider-neutral gateway architecture
-- [x] Capability-aware routing
-- [x] Multiple account configuration
-- [x] Retry/cooldown/fallback controls
-- [x] Usage and cost model
-- [x] Health state
-- [x] Observability boundaries
-- [x] Security boundaries
-- [x] Developer SDK
+- [x] Provider abstraction
+- [x] Multiple-account routing
+- [x] Capability-aware selection
+- [x] Retry/fallback handling
+- [x] Health/quarantine state
+- [x] Usage/cost normalization
 - [x] HTTP API
-- [x] Atomic Redis quota implementation
-- [x] Production-oriented Docker image
-- [x] Non-root runtime container
-- [x] Runtime secret configuration
-- [x] TypeScript build in CI
-- [x] Automated tests in CI
-- [x] CI currently green
+- [x] SDK
+- [x] Redis atomic quota implementation
+- [x] Swagger/OpenAPI documentation
 
-### Required before production certification
+### Verification
 
-- [ ] Live Redis integration testing
-- [ ] Live provider contract testing
+- [x] TypeScript build
+- [x] Normal test suite green
+- [x] E1 synthetic load passed
+- [x] E2 Redis atomic quota passed
+- [ ] E3 multi-instance evidence
+- [ ] E4 sustained-load evidence
+- [ ] E5 fairness evidence
+- [ ] E6 failure/recovery evidence
+- [ ] E7 automated certification gate
+
+### Deployment
+
+- [x] Docker build path
+- [x] CI/CD build/test path
+- [ ] Live provider contract tests
 - [ ] Container vulnerability scan
-- [ ] Load/concurrency testing
-- [ ] Repository/history secret scan
 - [ ] Production deployment smoke test
-- [ ] Real provider/account configuration wired into `src/server.ts`
-
----
+- [ ] Redis HA/backup validation
+- [ ] Monitoring and alerting configuration
+- [ ] Production secret-management integration
 
 ## Design principles
 
-1. **Provider neutrality** — application business logic should not contain provider-specific branches.
-2. **Capability first** — routing decisions must respect required capabilities.
-3. **Legitimate account usage** — multiple accounts are for legitimate, authorized configurations, not quota circumvention.
-4. **Bounded reliability** — retries and fallback must have explicit limits.
-5. **Observable execution** — usage, latency, health, and request identity should be normalized.
-6. **Credential isolation** — secrets belong in credential stores/runtime configuration, not business logic or telemetry.
-7. **Distributed correctness** — shared quota state must use atomic operations when multiple gateway instances are active.
-8. **Incremental implementation** — each phase is implemented, tested, documented, and verified before moving forward.
-9. **Honest production status** — a green CI pipeline is necessary but is not equivalent to production certification.
-
----
+1. **Provider neutrality** — application code should not need provider-specific branches.
+2. **Explicit eligibility** — routing cannot override health, capabilities, limits, or disabled state.
+3. **Fail closed** — quota and security failures must not silently become bypasses.
+4. **Observable without leaking secrets** — telemetry should be useful without exposing credentials.
+5. **Deterministic behavior** — routing and tests should have predictable tie-breaking.
+6. **Horizontal scalability** — shared state belongs in a distributed store when multiple instances are used.
+7. **Test the boundaries** — compiler, unit, HTTP, Redis, load, container, and deployment behavior should be validated independently.
+8. **Documentation follows the contract** — OpenAPI changes should accompany HTTP implementation changes.
 
 ## License
 
-Add the project's chosen license here before publishing the package for external consumption.
+See the repository license file for project licensing terms.
