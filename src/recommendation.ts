@@ -49,7 +49,7 @@ export class RecommendationEngine {
 
 function normalizeRecommendation(structured: Record<string, unknown> | undefined, context: { symbol: string; exchange?: string; horizon: string; requestId: string; conclusions: Record<string, string>; draft: string; critique: string }): Recommendation {
   const action = String(structured?.recommendation ?? 'HOLD').toUpperCase();
-  const recommendation: RecommendationAction = action === 'BUY' || action === 'AVOID' ? action : 'HOLD';
+  const recommendationAction: RecommendationAction = action === 'BUY' || action === 'AVOID' ? action : 'HOLD';
   const rawConfidence = Number(structured?.confidence ?? 0);
   const confidence = Number.isFinite(rawConfidence) ? Math.min(1, Math.max(0, rawConfidence)) : 0;
   const rawScores = structured?.scores;
@@ -61,7 +61,7 @@ function normalizeRecommendation(structured: Record<string, unknown> | undefined
   const recommendation: Recommendation = {
     symbol: context.symbol,
     horizon: context.horizon,
-    recommendation,
+    recommendation: recommendationAction,
     confidence,
     scores,
     evidence: list(structured?.evidence),
