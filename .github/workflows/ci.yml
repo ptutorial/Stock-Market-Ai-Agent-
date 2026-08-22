@@ -16,3 +16,15 @@ jobs:
       - run: npm install
       - run: npm run build
       - run: npm test
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Build Docker image
+        run: docker build --tag multi-provider-llm-gateway:ci .
+
+      - name: Validate Docker Compose configuration
+        env:
+          GATEWAY_API_KEY: ci-test-key
+          LLM_GATEWAY_CONFIG: '{"accounts":[]}'
+        run: docker compose config --quiet
