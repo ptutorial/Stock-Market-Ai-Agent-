@@ -3,7 +3,11 @@ import type { ToolCall } from './domain.js';
 import type { LLMGateway } from './gateway.js';
 import type { AgentContext, AgentDefinition, AgentResult } from './agents.js';
 import { ToolRegistry } from './tools.js';
-import { DEFAULT_AGENT_MODEL_POLICIES, LLMGatewayAgentAdapter } from './agent-llm.js';
+import {
+  DEFAULT_AGENT_MODEL_POLICIES,
+  LLMGatewayAgentAdapter,
+  MultiProviderAgentLLM,
+} from './agent-llm.js';
 import type { AgentLLMGateway, AgentModelPolicy } from './agent-llm.js';
 
 export interface AgentRuntimeOptions {
@@ -21,9 +25,20 @@ export class AgentRuntime {
 
   constructor(private readonly options: AgentRuntimeOptions) {
     this.maxRounds = options.maxRounds ?? 4;
-    if (options.agentLLM) this.llm = options.agentLLM;
-    else if (options.gateway) this.llm = new LLMGatewayAgentAdapter(options.gateway);
-    else throw new Error('AgentRuntime requires agentLLM or gateway');
+
+    if (options.agentLLM) {
+      this.llm = options.agentLLM;
+    } else if (options.gateway) {
+      // The gateway adapter implements the low-level provider/model contract.
+      // MultiProviderAgentLLM is the policy layer that resolves primary/fallback
+      // providers before invoking that adapter.
+      this.llm = new MultiProviderAgentLLM(
+        new LLMGatewayAgentAdapter(options.gateway),
+      );
+    } else {
+      throw new Error('AgentRuntime requires agentLLM or gateway');
+    }
+
     this.policies = { ...DEFAULT_AGENT_MODEL_POLICIES, ...(options.policies ?? {}) };
   }
 
