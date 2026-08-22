@@ -22,10 +22,6 @@ This document is the phased implementation roadmap for the multi-provider cloud 
 **Status:** Implemented — CI verification pending
 # Phase 8 — Concurrency & Distributed State
 **Status:** Implemented — CI verification pending
-
-### Note
-The Redis state boundary exists, but cross-process atomic quota reservation remains a production integration requirement.
-
 # Phase 9 — Usage, Cost & Accounting
 **Status:** Implemented — CI verification pending
 # Phase 10 — Health Monitoring
@@ -36,100 +32,63 @@ The Redis state boundary exists, but cross-process atomic quota reservation rema
 **Status:** Implemented — CI verification pending
 # Phase 13 — Comprehensive Testing
 **Status:** Implemented — CI verification pending
-
-### Verification requirement
-CI must execute the complete build and test suite and be green before historical CI-pending phases are considered verified. No phase is declared CI-green based on code inspection alone.
-
 # Phase 14 — Developer API & SDK
 **Status:** Implemented — CI verification pending
-
-### Goals
-
-Provide a clean, typed developer-facing API over the gateway without exposing internal routing, retry, credential or provider implementation details.
-
-### Completed
-
-- Added `src/sdk.ts`.
-- Added `GatewayClient` for high-level `generate()` and `stream()` operations.
-- Added `GatewayClientOptions` for accounts, adapters, credential store, usage sink and gateway policies.
-- Added `GenerateInput` with typed task, prompt and generation options.
-- Added `GatewayClientBuilder` for incremental configuration.
-- Added account and adapter validation at build time.
-- Added validation for retry and cooldown configuration.
-- Added `createGatewayClient()` convenience factory.
-- Added `gatewayClient()` fluent builder factory.
-- Exported SDK APIs from `src/index.ts`.
-- Added SDK unit/integration tests for validation, generation and streaming.
-
 # Phase 15 — Service/API Layer
 **Status:** Implemented — CI verification pending
 
+# Phase 16 — Redis & Production Scaling
+**Status:** Implemented — CI verification pending
+
 ### Goals
 
-Expose the typed SDK through a provider-neutral HTTP boundary while keeping authentication, request limits, request correlation and gateway execution outside provider-specific adapters.
+Provide a Redis-backed state implementation suitable for multiple gateway instances, with quota reservation performed atomically inside Redis rather than with a read/check/increment race across processes.
 
 ### Completed
 
-- Added `src/http.ts`.
-- Added `createGatewayHttpHandler()`.
-- Added `GatewayHttpRequest` and `GatewayHttpResponse` contracts.
-- Added `POST /v1/generate` endpoint.
-- Added method validation.
-- Added request payload validation.
-- Added configurable request body size limit (1 MiB default).
-- Added optional Bearer API-key authentication.
-- Added request correlation through `x-request-id`.
-- Generates a request ID when the client does not provide one.
-- Added `404`, `405`, `400`, `401`, `413` and gateway-error responses.
-- Added `collectStream()` helper for adapters/framework integrations that need to materialize an async stream.
-- Exported HTTP APIs from `src/index.ts`.
-- Added HTTP boundary tests.
+- Added `src/redis.ts`.
+- Added `RedisAtomicClient` contract exposing Redis `EVAL`.
+- Added `AtomicRedisStateStore` implementing `StateStore`.
+- Added atomic RPM/RPD/TPM/TPD quota checks and increments through a single Lua script.
+- Added TTLs to minute/day quota buckets.
+- Preserved the existing `InMemoryStateStore` for local/test use.
+- Exported the atomic Redis implementation from `src/index.ts`.
 
-### API
+### Atomic reservation flow
 
 ```text
-POST /v1/generate
-Authorization: Bearer <configured-api-key>   # optional
-X-Request-Id: <client-id>                    # optional
-Content-Type: application/json
-
-{
-  "task": "general",
-  "prompt": "Hello",
-  "options": {}
-}
+Gateway request
+      ↓
+AtomicRedisStateStore.reserve()
+      ↓
+Redis EVAL / Lua
+      ↓
+check all limits
+      ↓
+ ┌───────────────┐
+ │ within limits │──No──> reject without increment
+ └───────┬───────┘
+         │ Yes
+         ↓
+ atomic increment of request/token buckets
+         ↓
+ accept reservation
 ```
 
-The handler returns the gateway result plus the request ID and does not expose provider credentials.
+### Production boundary
 
-### Security boundary
-
-```text
-HTTP request
-    ↓
-method / auth / size validation
-    ↓
-request ID
-    ↓
-GatewayClient
-    ↓
-LLMGateway
-    ↓
-routing / retry / health / provider adapter
-```
+The previous Redis implementation performed separate GET operations followed by INCR operations, which could race between gateway instances. Phase 16 introduces the atomic `EVAL` path for quota reservation. The state `get/set/update` operations remain simple read/write operations and should not be treated as a general-purpose distributed transaction mechanism.
 
 ### Exit criteria
 
-- Typed HTTP request/response boundary. **Complete.**
-- Generate endpoint. **Complete.**
-- Request authentication boundary. **Complete.**
-- Payload-size protection. **Complete.**
-- Request correlation. **Complete.**
-- HTTP boundary tests. **Complete.**
+- Redis-backed `StateStore` implementation. **Complete.**
+- Atomic quota reservation. **Complete.**
+- Minute/day quota buckets. **Complete.**
+- TTL cleanup. **Complete.**
+- Multi-instance race-safe quota check/increment path. **Complete for reservation path.**
 - CI build/test verification. **Pending.**
+- Live Redis integration test. **Pending.**
 
-# Phase 16 — Redis & Production Scaling
-**Status:** Optional / Later
 # Phase 17 — Additional Providers
 **Status:** Future
 # Phase 18 — Production Readiness Review
@@ -168,7 +127,7 @@ Phase 12 Security hardening                [IMPLEMENTED]
 Phase 13 Comprehensive testing             [IMPLEMENTED]
 Phase 14 Developer API / SDK               [IMPLEMENTED]
 Phase 15 Service/API layer                 [IMPLEMENTED]
-Phase 16 Optional Redis scaling
+Phase 16 Redis / production scaling        [IMPLEMENTED]
 Phase 17 Additional providers
 Phase 18 Production readiness
 ```
