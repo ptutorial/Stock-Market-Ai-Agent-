@@ -1,0 +1,270 @@
+{
+  "phase": "Batch E",
+  "status": "PASS",
+  "startedAt": "2026-08-22T22:24:09.664Z",
+  "completedAt": "2026-08-22T22:25:30.059Z",
+  "checks": {
+    "E1": "PASS",
+    "E2": "PASS",
+    "E3": "PASS",
+    "E4": "PASS",
+    "E5": "PASS",
+    "E6": "PASS"
+  },
+  "results": {
+    "E1": {
+      "name": "Synthetic gateway load",
+      "command": "npm run load:test",
+      "status": "PASS",
+      "exitCode": 0,
+      "durationMs": 12753.25,
+      "evidence": {
+        "total": 1000,
+        "concurrency": 50,
+        "completed": 1000,
+        "failed": 0,
+        "providerCalls": 1000,
+        "elapsedMs": 101.49,
+        "throughputRps": 9853.45,
+        "p95Ms": 15.11,
+        "stateRequests": 1000,
+        "stateTokens": 5000
+      },
+      "stdout": "> multi-provider-llm-gateway@0.1.0 load:test\n> npm run build && node scripts/load-test.mjs\n\n\n> multi-provider-llm-gateway@0.1.0 build\n> tsc -p tsconfig.json\n\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 101.49,\n  \"throughputRps\": 9853.45,\n  \"p95Ms\": 15.11,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}",
+      "stderr": "npm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted.\nnpm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted."
+    },
+    "E2": {
+      "name": "Redis atomic quota concurrency",
+      "command": "npm run load:redis",
+      "status": "PASS",
+      "exitCode": 0,
+      "durationMs": 9702.94,
+      "evidence": {
+        "total": 100,
+        "rpm": 25,
+        "accepted": 25,
+        "rejected": 75,
+        "quota": {
+          "minuteRequests": 25,
+          "minuteTokens": 25,
+          "dayRequests": 25,
+          "dayTokens": 25
+        }
+      },
+      "stdout": "> multi-provider-llm-gateway@0.1.0 load:redis\n> npm run build && node scripts/load-redis-test.mjs\n\n\n> multi-provider-llm-gateway@0.1.0 build\n> tsc -p tsconfig.json\n\n{\n  \"total\": 100,\n  \"rpm\": 25,\n  \"accepted\": 25,\n  \"rejected\": 75,\n  \"quota\": {\n    \"minuteRequests\": 25,\n    \"minuteTokens\": 25,\n    \"dayRequests\": 25,\n    \"dayTokens\": 25\n  }\n}",
+      "stderr": "npm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted.\nnpm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted."
+    },
+    "E3": {
+      "name": "Multi-instance shared quota",
+      "command": "npm run load:multi",
+      "status": "PASS",
+      "exitCode": 0,
+      "durationMs": 12651.03,
+      "evidence": {
+        "instances": 2,
+        "perInstance": 50,
+        "attempted": 100,
+        "rpm": 40,
+        "accepted": 40,
+        "rejected": 60,
+        "quota": {
+          "minuteRequests": 40,
+          "minuteTokens": 40,
+          "dayRequests": 40,
+          "dayTokens": 40
+        }
+      },
+      "stdout": "> multi-provider-llm-gateway@0.1.0 load:multi\n> npm run build && node scripts/load-multi-instance.mjs\n\n\n> multi-provider-llm-gateway@0.1.0 build\n> tsc -p tsconfig.json\n\n{\n  \"instances\": 2,\n  \"perInstance\": 50,\n  \"attempted\": 100,\n  \"rpm\": 40,\n  \"accepted\": 40,\n  \"rejected\": 60,\n  \"quota\": {\n    \"minuteRequests\": 40,\n    \"minuteTokens\": 40,\n    \"dayRequests\": 40,\n    \"dayTokens\": 40\n  }\n}",
+      "stderr": "npm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted.\nnpm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted."
+    },
+    "E4": {
+      "name": "Sustained load",
+      "command": "npm run load:sustained",
+      "status": "PASS",
+      "exitCode": 0,
+      "durationMs": 15991.12,
+      "evidence": {
+        "rounds": 10,
+        "requestsPerRound": 1000,
+        "concurrency": 50,
+        "averageP95Ms": 9.81,
+        "results": [
+          {
+            "total": 1000,
+            "concurrency": 50,
+            "completed": 1000,
+            "failed": 0,
+            "providerCalls": 1000,
+            "elapsedMs": 98.47,
+            "throughputRps": 10155.41,
+            "p95Ms": 9.5,
+            "stateRequests": 1000,
+            "stateTokens": 5000
+          },
+          {
+            "total": 1000,
+            "concurrency": 50,
+            "completed": 1000,
+            "failed": 0,
+            "providerCalls": 1000,
+            "elapsedMs": 87.38,
+            "throughputRps": 11444.33,
+            "p95Ms": 7.03,
+            "stateRequests": 1000,
+            "stateTokens": 5000
+          },
+          {
+            "total": 1000,
+            "concurrency": 50,
+            "completed": 1000,
+            "failed": 0,
+            "providerCalls": 1000,
+            "elapsedMs": 98.44,
+            "throughputRps": 10158.42,
+            "p95Ms": 8.62,
+            "stateRequests": 1000,
+            "stateTokens": 5000
+          },
+          {
+            "total": 1000,
+            "concurrency": 50,
+            "completed": 1000,
+            "failed": 0,
+            "providerCalls": 1000,
+            "elapsedMs": 92.6,
+            "throughputRps": 10798.9,
+            "p95Ms": 7.84,
+            "stateRequests": 1000,
+            "stateTokens": 5000
+          },
+          {
+            "total": 1000,
+            "concurrency": 50,
+            "completed": 1000,
+            "failed": 0,
+            "providerCalls": 1000,
+            "elapsedMs": 97.42,
+            "throughputRps": 10264.66,
+            "p95Ms": 10.83,
+            "stateRequests": 1000,
+            "stateTokens": 5000
+          },
+          {
+            "total": 1000,
+            "concurrency": 50,
+            "completed": 1000,
+            "failed": 0,
+            "providerCalls": 1000,
+            "elapsedMs": 101.56,
+            "throughputRps": 9846.73,
+            "p95Ms": 10.05,
+            "stateRequests": 1000,
+            "stateTokens": 5000
+          },
+          {
+            "total": 1000,
+            "concurrency": 50,
+            "completed": 1000,
+            "failed": 0,
+            "providerCalls": 1000,
+            "elapsedMs": 88.03,
+            "throughputRps": 11359.18,
+            "p95Ms": 9.05,
+            "stateRequests": 1000,
+            "stateTokens": 5000
+          },
+          {
+            "total": 1000,
+            "concurrency": 50,
+            "completed": 1000,
+            "failed": 0,
+            "providerCalls": 1000,
+            "elapsedMs": 85.25,
+            "throughputRps": 11730.41,
+            "p95Ms": 9.41,
+            "stateRequests": 1000,
+            "stateTokens": 5000
+          },
+          {
+            "total": 1000,
+            "concurrency": 50,
+            "completed": 1000,
+            "failed": 0,
+            "providerCalls": 1000,
+            "elapsedMs": 107.83,
+            "throughputRps": 9273.89,
+            "p95Ms": 11.89,
+            "stateRequests": 1000,
+            "stateTokens": 5000
+          },
+          {
+            "total": 1000,
+            "concurrency": 50,
+            "completed": 1000,
+            "failed": 0,
+            "providerCalls": 1000,
+            "elapsedMs": 124.05,
+            "throughputRps": 8061.3,
+            "p95Ms": 13.84,
+            "stateRequests": 1000,
+            "stateTokens": 5000
+          }
+        ]
+      },
+      "stdout": "> multi-provider-llm-gateway@0.1.0 load:sustained\n> npm run build && node scripts/load-sustained.mjs\n\n\n> multi-provider-llm-gateway@0.1.0 build\n> tsc -p tsconfig.json\n\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 98.47,\n  \"throughputRps\": 10155.41,\n  \"p95Ms\": 9.5,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 87.38,\n  \"throughputRps\": 11444.33,\n  \"p95Ms\": 7.03,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 98.44,\n  \"throughputRps\": 10158.42,\n  \"p95Ms\": 8.62,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 92.6,\n  \"throughputRps\": 10798.9,\n  \"p95Ms\": 7.84,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 97.42,\n  \"throughputRps\": 10264.66,\n  \"p95Ms\": 10.83,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 101.56,\n  \"throughputRps\": 9846.73,\n  \"p95Ms\": 10.05,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 88.03,\n  \"throughputRps\": 11359.18,\n  \"p95Ms\": 9.05,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 85.25,\n  \"throughputRps\": 11730.41,\n  \"p95Ms\": 9.41,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 107.83,\n  \"throughputRps\": 9273.89,\n  \"p95Ms\": 11.89,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}\n{\n  \"total\": 1000,\n  \"concurrency\": 50,\n  \"completed\": 1000,\n  \"failed\": 0,\n  \"providerCalls\": 1000,\n  \"elapsedMs\": 124.05,\n  \"throughputRps\": 8061.3,\n  \"p95Ms\": 13.84,\n  \"stateRequests\": 1000,\n  \"stateTokens\": 5000\n}\n{\n  \"rounds\": 10,\n  \"requestsPerRound\": 1000,\n  \"concurrency\": 50,\n  \"averageP95Ms\": 9.81,\n  \"results\": [\n    {\n      \"total\": 1000,\n      \"concurrency\": 50,\n      \"completed\": 1000,\n      \"failed\": 0,\n      \"providerCalls\": 1000,\n      \"elapsedMs\": 98.47,\n      \"throughputRps\": 10155.41,\n      \"p95Ms\": 9.5,\n      \"stateRequests\": 1000,\n      \"stateTokens\": 5000\n    },\n    {\n      \"total\": 1000,\n      \"concurrency\": 50,\n      \"completed\": 1000,\n      \"failed\": 0,\n      \"providerCalls\": 1000,\n      \"elapsedMs\": 87.38,\n      \"throughputRps\": 11444.33,\n      \"p95Ms\": 7.03,\n      \"stateRequests\": 1000,\n      \"stateTokens\": 5000\n    },\n    {\n      \"total\": 1000,\n      \"concurrency\": 50,\n      \"completed\": 1000,\n      \"failed\": 0,\n      \"providerCalls\": 1000,\n      \"elapsedMs\": 98.44,\n      \"throughputRps\": 10158.42,\n      \"p95Ms\": 8.62,\n      \"stateRequests\": 1000,\n      \"stateTokens\": 5000\n    },\n    {\n      \"total\": 1000,\n      \"concurrency\": 50,\n      \"completed\": 1000,\n      \"failed\": 0,\n      \"providerCalls\": 1000,\n      \"elapsedMs\": 92.6,\n      \"throughputRps\": 10798.9,\n      \"p95Ms\": 7.84,\n      \"stateRequests\": 1000,\n      \"stateTokens\": 5000\n    },\n    {\n      \"total\": 1000,\n      \"concurrency\": 50,\n      \"completed\": 1000,\n      \"failed\": 0,\n      \"providerCalls\": 1000,\n      \"elapsedMs\": 97.42,\n      \"throughputRps\": 10264.66,\n      \"p95Ms\": 10.83,\n      \"stateRequests\": 1000,\n      \"stateTokens\": 5000\n    },\n    {\n      \"total\": 1000,\n      \"concurrency\": 50,\n      \"completed\": 1000,\n      \"failed\": 0,\n      \"providerCalls\": 1000,\n      \"elapsedMs\": 101.56,\n      \"throughputRps\": 9846.73,\n      \"p95Ms\": 10.05,\n      \"stateRequests\": 1000,\n      \"stateTokens\": 5000\n    },\n    {\n      \"total\": 1000,\n      \"concurrency\": 50,\n      \"completed\": 1000,\n      \"failed\": 0,\n      \"providerCalls\": 1000,\n      \"elapsedMs\": 88.03,\n      \"throughputRps\": 11359.18,\n      \"p95Ms\": 9.05,\n      \"stateRequests\": 1000,\n      \"stateTokens\": 5000\n    },\n    {\n      \"total\": 1000,\n      \"concurrency\": 50,\n      \"completed\": 1000,\n      \"failed\": 0,\n      \"providerCalls\": 1000,\n      \"elapsedMs\": 85.25,\n      \"throughputRps\": 11730.41,\n      \"p95Ms\": 9.41,\n      \"stateRequests\": 1000,\n      \"stateTokens\": 5000\n    },\n    {\n      \"total\": 1000,\n      \"concurrency\": 50,\n      \"completed\": 1000,\n      \"failed\": 0,\n      \"providerCalls\": 1000,\n      \"elapsedMs\": 107.83,\n      \"throughputRps\": 9273.89,\n      \"p95Ms\": 11.89,\n      \"stateRequests\": 1000,\n      \"stateTokens\": 5000\n    },\n    {\n      \"total\": 1000,\n      \"concurrency\": 50,\n      \"completed\": 1000,\n      \"failed\": 0,\n      \"providerCalls\": 1000,\n      \"elapsedMs\": 124.05,\n      \"throughputRps\": 8061.3,\n      \"p95Ms\": 13.84,\n      \"stateRequests\": 1000,\n      \"stateTokens\": 5000\n    }\n  ]\n}",
+      "stderr": "npm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted.\nnpm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted."
+    },
+    "E5": {
+      "name": "Account fairness",
+      "command": "npm run load:fairness",
+      "status": "PASS",
+      "exitCode": 0,
+      "durationMs": 15434.57,
+      "evidence": {
+        "total": 300,
+        "counts": {
+          "fair-a": 100,
+          "fair-b": 100,
+          "fair-c": 100
+        },
+        "spread": 0,
+        "expectedRange": [
+          100,
+          100
+        ],
+        "elapsedMs": 74.64
+      },
+      "stdout": "> multi-provider-llm-gateway@0.1.0 load:fairness\n> npm run build && node scripts/load-fairness.mjs\n\n\n> multi-provider-llm-gateway@0.1.0 build\n> tsc -p tsconfig.json\n\n{\n  \"total\": 300,\n  \"counts\": {\n    \"fair-a\": 100,\n    \"fair-b\": 100,\n    \"fair-c\": 100\n  },\n  \"spread\": 0,\n  \"expectedRange\": [\n    100,\n    100\n  ],\n  \"elapsedMs\": 74.64\n}",
+      "stderr": "npm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted.\nnpm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted."
+    },
+    "E6": {
+      "name": "Failure/recovery under load",
+      "command": "npm run load:failure",
+      "status": "PASS",
+      "exitCode": 0,
+      "durationMs": 13851.13,
+      "evidence": {
+        "firstReservation": true,
+        "disconnectedOperationFailed": true,
+        "recoveredReservation": true,
+        "quota": {
+          "minuteRequests": 2,
+          "minuteTokens": 2,
+          "dayRequests": 2,
+          "dayTokens": 2
+        }
+      },
+      "stdout": "> multi-provider-llm-gateway@0.1.0 load:failure\n> npm run build && node scripts/load-failure-recovery.mjs\n\n\n> multi-provider-llm-gateway@0.1.0 build\n> tsc -p tsconfig.json\n\n{\n  \"firstReservation\": true,\n  \"disconnectedOperationFailed\": true,\n  \"recoveredReservation\": true,\n  \"quota\": {\n    \"minuteRequests\": 2,\n    \"minuteTokens\": 2,\n    \"dayRequests\": 2,\n    \"dayTokens\": 2\n  }\n}",
+      "stderr": "npm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted.\nnpm WARN config optional Use `--omit=optional` to exclude optional dependencies, or\nnpm WARN config `--include=optional` to include them.\nnpm WARN config \nnpm WARN config     Default value does install optional deps unless otherwise omitted."
+    }
+  },
+  "successCriteria": {
+    "E1": "all requests complete; provider/state counts match; p95 within threshold",
+    "E2": "accepted reservations never exceed RPM; Redis counters match accepted reservations",
+    "E3": "all instances share one quota and combined accepted reservations never exceed RPM",
+    "E4": "all rounds complete and average p95 remains within threshold",
+    "E5": "round-robin accounts remain within floor/ceiling distribution",
+    "E6": "Redis failure fails closed and reconnection restores reservation capability",
+    "E7": "all E1-E6 outputs are green and attached to the release record"
+  }
+}
