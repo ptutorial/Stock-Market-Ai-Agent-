@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createGatewayHttpHandler } from '../dist/http.js';
+
+const adapter = { name: 'test', capabilities: ['text_generation'], async generate() { return { text: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }; } };
+const account = { id: 'a1', provider: 'test', credentialRef: 'env:TEST', models: ['m1'], capabilities: ['text_generation'] };
+const base = { accounts: [account], adapters: [adapter] };
+
+test('HTTP handler validates method and request payload', async () => {
+  const handler = createGatewayHttpHandler(base);
+  assert.equal((await handler({ method: 'GET', path: '/v1/generate', body: {} })).status, 405);
+  assert.equal((await handler({ method: 'POST', path: '/v1/generate', body: { task: 'general', prompt: '' } })).status, 400);
+});
+
+test('HTTP handler enforces optional bearer authentication', async () => {
+  const handler = createGatewayHttpHandler({ ...base, apiKey: 'secret' });
+  const response = await handler({ method: 'POST', path: '/v1/generate', body: { task: 'general', prompt: 'hello' } });
+  assert.equal(response.status, 401);
+  assert.ok(response.headers['x-request-id']);
+});
+
+test('HTTP handler rejects oversized payloads', async () => {
+  const handler = createGatewayHttpHandler({ ...base, maxBodyBytes: 10 });
+  assert.equal((await handler({ method: 'POST', path: '/v1/generate', body: { task: 'general', prompt: 'hello world' } })).status, 413);
+});
+
+test('HTTP handler returns not found for unknown routes', async () => {
+  const handler = createGatewayHttpHandler(base);
+  assert.equal((await handler({ method: 'POST', path: '/unknown', body: {} })).status, 404);
+});
