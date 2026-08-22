@@ -24,6 +24,7 @@ export * from './data-sources.js';
 export { GeminiAdapter } from './providers/gemini.js';
 export { GroqAdapter, OpenRouterAdapter } from './providers/openai-compatible.js';
 export { CloudflareWorkersAIAdapter } from './providers/cloudflare.js';
+export { YahooFinanceDataSource } from './providers/yahoo-finance.js';
 
 import { LLMGateway } from './gateway.js';
 import { GeminiAdapter } from './providers/gemini.js';
