@@ -20,6 +20,7 @@ export * from './agent-runtime.js';
 export * from './recommendation.js';
 export * from './market-data.js';
 export * from './stock-tools.js';
+export * from './data-sources.js';
 export { GeminiAdapter } from './providers/gemini.js';
 export { GroqAdapter, OpenRouterAdapter } from './providers/openai-compatible.js';
 export { CloudflareWorkersAIAdapter } from './providers/cloudflare.js';
