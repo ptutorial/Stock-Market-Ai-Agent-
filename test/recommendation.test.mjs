@@ -57,11 +57,22 @@ function createTestRuntime() {
         sector: 'sector_strength',
         risk: 'risk_metrics',
       };
-      if (toolByRole[role]) {
+      // Return one tool call, then a conclusion on the next round. This models
+      // the normal tool-call -> tool-result -> conclusion lifecycle without
+      // artificially consuming the agent's configured tool-round budget.
+      if (toolByRole[role] && !prompt.includes('TOOL_RESULTS:')) {
         return {
           model: 'test-model',
           text: `${role} conclusion`,
           toolCalls: [{ id: `${role}-1`, name: toolByRole[role], arguments: { symbol: 'RELIANCE' } }],
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        };
+      }
+      if (toolByRole[role]) {
+        return {
+          model: 'test-model',
+          text: `${role} conclusion`,
+          toolCalls: [],
           usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
         };
       }
@@ -120,7 +131,7 @@ test('end-to-end recommendation runs all specialists and final decision', async 
     'fundamental', 'news', 'risk', 'sector', 'technical',
   ]);
   assert.deepEqual(calls.map((item) => item.role), [
-    'technical', 'fundamental', 'news', 'sector', 'risk',
+    'technical', 'technical', 'fundamental', 'fundamental', 'news', 'news', 'sector', 'sector', 'risk', 'risk',
     'recommendation', 'critic', 'final-decision',
   ]);
 });
@@ -142,7 +153,7 @@ test('invalid final recommendation fails closed', async () => {
   const gateway = {
     async generate(_task, prompt) {
       const isSpecialist = /Analyze price trend|Analyze financial quality|Analyze supplied recent news|Analyze sector-relative|Assess downside risk/.test(prompt);
-      if (isSpecialist) {
+      if (isSpecialist && !prompt.includes('TOOL_RESULTS:')) {
         const name = prompt.includes('price trend') ? 'market_price'
           : prompt.includes('financial quality') ? 'fundamentals'
           : prompt.includes('recent news') ? 'market_news'
@@ -151,6 +162,9 @@ test('invalid final recommendation fails closed', async () => {
         return { model: 'test', text: 'ok', toolCalls: [{ name, arguments: { symbol: 'TCS' } }], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
       }
       if (prompt.includes('Challenge the draft') || prompt.includes('Synthesize agent evidence')) {
+        return { model: 'test', text: 'ok', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+      }
+      if (isSpecialist) {
         return { model: 'test', text: 'ok', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
       }
       return { model: 'test', text: JSON.stringify({ recommendation: 'MAYBE', confidence: 2 }), toolCalls: [], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
