@@ -6,129 +6,104 @@ This document is the phased implementation roadmap for the multi-provider cloud 
 
 # Phase 0 — Repository Foundation
 **Status:** Complete
-
 # Phase 1 — Core Domain Model & Contracts
 **Status:** Complete
-
 # Phase 2 — Configuration & Credential Management
 **Status:** Complete
-
 # Phase 3 — Provider Adapter SDK
 **Status:** Implemented — CI verification pending
-
 # Phase 4 — Model & Capability Discovery
 **Status:** Implemented — CI verification pending
-
 # Phase 5 — Account Selection & Routing Engine
 **Status:** Implemented — CI verification pending
-
 # Phase 6 — Rate-Limit & Quota Management
 **Status:** Implemented — CI verification pending
-
 # Phase 7 — Retry, Failure Classification & Fallback
 **Status:** Implemented — CI verification pending
-
 # Phase 8 — Concurrency & Distributed State
 **Status:** Implemented — CI verification pending
 
 ### Note
-
 The Redis state boundary exists, but cross-process atomic quota reservation remains a production integration requirement.
 
 # Phase 9 — Usage, Cost & Accounting
 **Status:** Implemented — CI verification pending
-
 # Phase 10 — Health Monitoring
 **Status:** Implemented — CI verification pending
-
 # Phase 11 — Observability
+**Status:** Implemented — CI verification pending
 
+# Phase 12 — Security Hardening
 **Status:** Implemented — CI verification pending
 
 ### Goals
 
-Provide provider-neutral telemetry for requests, latency, tokens, estimated cost, failures and health operations without exposing credentials or sensitive request content.
+Protect credential references and telemetry, constrain outbound provider communication, prevent accidental secret leakage, and provide security primitives that remain provider-neutral.
 
 ### Completed
 
-- Added `src/observability.ts`.
-- Added `MetricLabels` for provider/account/model/operation/status/error dimensions.
-- Added request observation contract with correlation `requestId`.
-- Added counter metrics.
-- Added latency histogram metrics with count, sum, minimum and maximum.
-- Added request event capture.
-- Added request metric recording helper.
-- Added token and estimated-cost counters.
-- Added `InMemoryMetrics` for local/test use.
-- Added `NoopObservability` for zero-overhead disabled telemetry.
-- Added error sanitization that retains category/message without copying arbitrary error object fields.
-- Exported observability APIs from `src/index.ts`.
-- Added tests for request metrics, labeled aggregation and error sanitization.
+- Added `src/security.ts`.
+- Added credential-reference validation so configuration accepts references rather than arbitrary secret material.
+- Added secret redaction for common credential/token/password/authorization fields.
+- Added recursive object redaction for nested telemetry/log structures.
+- Added HTTPS-only outbound URL validation.
+- Added explicit outbound host allowlisting to reduce SSRF risk.
+- Added constant-time equality helper using SHA-256 digests and `timingSafeEqual`.
+- Added safe error extraction that only exposes category/message metadata.
+- Exported security helpers from `src/index.ts`.
+- Added tests for credential references, secret redaction, outbound URL validation, constant-time comparison and safe error handling.
 
-### Metrics
+### Security boundaries
 
 ```text
-Requests:
-  gateway_requests_total
+Configuration
+    ↓
+credentialRef only
+    ↓
+Credential resolver
+    ↓
+Provider adapter
 
-Latency:
-  gateway_request_latency_ms
+Telemetry / logs
+    ↓
+redactObject / safeError
+    ↓
+Observability sink
 
-Tokens:
-  gateway_tokens_total
-
-Estimated cost:
-  gateway_estimated_cost_total
+Outbound URL
+    ↓
+HTTPS required
+    ↓
+Host allowlist
+    ↓
+Provider request
 ```
 
-### Telemetry flow
+### Important limitation
 
-```text
-Gateway operation
-      |
-      v
-RequestObservation
-      |
-      +--> request counter
-      +--> latency histogram
-      +--> token counter
-      +--> cost counter
-      +--> optional event sink
-```
-
-### Security boundary
-
-Observability records identifiers and aggregate usage data, but does not automatically record prompts, model responses, credentials, API keys or arbitrary provider error objects. Production sinks can implement `ObservabilitySink` for OpenTelemetry, Prometheus, structured logs or another telemetry system without coupling the gateway core to a vendor.
+These primitives do not by themselves prove that every provider adapter uses them. Phase 13 must add integration/security tests around the complete request path and verify that no adapter, logger or configuration path bypasses the security boundary.
 
 ### Exit criteria
 
-- Request count metrics available. **Complete.**
-- Latency measurements available. **Complete.**
-- Provider/account/model dimensions available. **Complete.**
-- Token and estimated-cost metrics available. **Complete.**
-- Failure category dimension available. **Complete.**
-- Request correlation ID supported. **Complete.**
-- Sensitive error object fields are not copied into telemetry. **Complete.**
+- Credential references validated. **Complete.**
+- Common secrets redacted recursively. **Complete.**
+- Outbound HTTPS and host allowlisting available. **Complete.**
+- Safe error metadata extraction available. **Complete.**
+- Constant-time secret comparison available. **Complete.**
+- Security unit tests added. **Complete.**
+- Complete-path security verification. **Pending — Phase 13.**
 - CI build and test verification. **Pending.**
-
-# Phase 12 — Security Hardening
-**Status:** Planned
 
 # Phase 13 — Comprehensive Testing
 **Status:** Planned
-
 # Phase 14 — Developer API & SDK
 **Status:** Planned
-
 # Phase 15 — Service/API Layer
 **Status:** Optional / Later
-
 # Phase 16 — Redis & Production Scaling
 **Status:** Optional / Later
-
 # Phase 17 — Additional Providers
 **Status:** Future
-
 # Phase 18 — Production Readiness Review
 **Status:** Future
 
@@ -161,7 +136,7 @@ Phase 8  Concurrency / distributed state    [IMPLEMENTED]
 Phase 9  Usage / cost                       [IMPLEMENTED]
 Phase 10 Health monitoring                  [IMPLEMENTED]
 Phase 11 Observability                     [IMPLEMENTED]
-Phase 12 Security hardening
+Phase 12 Security hardening                [IMPLEMENTED]
 Phase 13 Comprehensive testing
 Phase 14 Developer API / SDK
 Phase 15 Optional service API
