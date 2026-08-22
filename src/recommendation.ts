@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentContext, AgentResult, AgentRegistry } from './agents.js';
 import type { AgentRuntime } from './agent-runtime.js';
+import { validateRecommendation, type RecommendationAction } from './recommendation-schema.js';
 
-export type RecommendationAction = 'BUY' | 'HOLD' | 'AVOID';
-export interface Recommendation { symbol: string; exchange?: string; horizon: string; recommendation: RecommendationAction; confidence: number; scores: Record<string, number>; evidence: string[]; risks: string[]; agentConclusions: Record<string, string>; draft: string; critique: string; requestId: string; }
+export interface Recommendation { symbol: string; exchange?: string; horizon: string; recommendation: RecommendationAction; confidence: number; scores: Record<string, number>; evidence: string[]; risks: string[]; invalidationConditions: string[]; sourceProvenance: string[]; agentConclusions: Record<string, string>; draft: string; critique: string; requestId: string; }
 export interface RecommendationEngineOptions { agents: AgentRegistry; runtime: AgentRuntime; }
 
 export class RecommendationEngine {
@@ -27,11 +27,6 @@ export class RecommendationEngine {
 }
 
 function normalizeRecommendation(structured: Record<string, unknown> | undefined, context: { symbol: string; exchange: string; horizon: string; requestId: string; conclusions: Record<string, string>; draft: string; critique: string }): Recommendation {
-  const action = String(structured?.recommendation ?? 'HOLD').toUpperCase();
-  const recommendationAction: RecommendationAction = action === 'BUY' || action === 'AVOID' ? action : 'HOLD';
-  const rawConfidence = Number(structured?.confidence ?? 0); const confidence = Number.isFinite(rawConfidence) ? Math.min(1, Math.max(0, rawConfidence)) : 0;
-  const scores: Record<string, number> = {};
-  if (structured?.scores && typeof structured.scores === 'object' && !Array.isArray(structured.scores)) for (const [key, value] of Object.entries(structured.scores)) { const score = Number(value); if (Number.isFinite(score)) scores[key] = Math.min(100, Math.max(0, score)); }
-  const list = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-  return { symbol: context.symbol, exchange: context.exchange, horizon: context.horizon, recommendation: recommendationAction, confidence, scores, evidence: list(structured?.evidence), risks: list(structured?.risks), agentConclusions: context.conclusions, draft: context.draft, critique: context.critique, requestId: context.requestId };
+  const validated = validateRecommendation(structured);
+  return { symbol: context.symbol, exchange: context.exchange, horizon: context.horizon, ...validated, agentConclusions: context.conclusions, draft: context.draft, critique: context.critique, requestId: context.requestId };
 }
