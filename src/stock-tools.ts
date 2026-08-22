@@ -2,6 +2,8 @@ import type { ToolDefinition } from './domain.js';
 import type { ToolHandler } from './tools.js';
 import type { MarketDataProvider } from './market-data.js';
 import { optionalPositiveInteger, optionalString, requiredString } from './market-data.js';
+import type { DataSourceRouter } from './data-sources.js';
+import { getStockSnapshot } from './stock-snapshot.js';
 
 const schema = (properties: Record<string, unknown>, required: string[] = ['symbol']) => ({ type: 'object', properties, required, additionalProperties: false });
 function tool(name: string, description: string, inputSchema: Record<string, unknown>): ToolDefinition { return { name, description, inputSchema }; }
@@ -16,4 +18,32 @@ export function createStockTools(provider: MarketDataProvider): ToolHandler[] {
     { definition: tool('sector_strength', 'Get sector strength context for a symbol.', schema({ symbol: { type: 'string', minLength: 1 }, exchange: { type: 'string' } })), async execute(input) { return provider.sectorStrength(requiredString(input, 'symbol'), optionalString(input, 'exchange')); } },
     { definition: tool('risk_metrics', 'Get deterministic risk metrics for a symbol.', schema({ symbol: { type: 'string', minLength: 1 }, exchange: { type: 'string' } })), async execute(input) { return provider.risk(requiredString(input, 'symbol'), optionalString(input, 'exchange')); } },
   ];
+}
+
+export function createStockSnapshotTool(router: DataSourceRouter): ToolHandler {
+  return {
+    definition: tool(
+      'stock_snapshot',
+      'Build a source-aware evidence snapshot for a stock, including quote, history, technicals, fundamentals, news, sector and risk data.',
+      schema({
+        symbol: { type: 'string', minLength: 1 },
+        exchange: { type: 'string', default: 'NSE' },
+        timeframe: { type: 'string', default: '1d' },
+        historyLimit: { type: 'integer', minimum: 1, maximum: 5000, default: 100 },
+        newsLimit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+      }),
+    ),
+    async execute(input) {
+      return getStockSnapshot(
+        router,
+        requiredString(input, 'symbol'),
+        optionalString(input, 'exchange') ?? 'NSE',
+        {
+          timeframe: optionalString(input, 'timeframe') ?? '1d',
+          historyLimit: optionalPositiveInteger(input, 'historyLimit') ?? 100,
+          newsLimit: optionalPositiveInteger(input, 'newsLimit') ?? 10,
+        },
+      );
+    },
+  };
 }
