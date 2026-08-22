@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { createClient } from 'redis';
-import { createGatewayHttpHandler } from './http.js';
+import { createGatewayHttpHandler, type GatewayHttpServerOptions } from './http.js';
 import { flattenAccounts, loadConfigFromEnvironment } from './config.js';
 import { GeminiAdapter } from './providers/gemini.js';
 import { CloudflareWorkersAIAdapter } from './providers/cloudflare.js';
@@ -18,13 +18,15 @@ const config = loadConfigFromEnvironment();
 const adapters = [new GeminiAdapter(), new GroqAdapter(), new OpenRouterAdapter(), new CloudflareWorkersAIAdapter()];
 const configuredProviders = new Set(flattenAccounts(config).map((account) => account.provider));
 const availableProviders = new Set(adapters.map((adapter) => adapter.name));
-for (const provider of configuredProviders) if (!availableProviders.has(provider)) throw new Error(`No adapter is registered for configured provider: ${provider}`);
+for (const provider of configuredProviders) {
+  if (!availableProviders.has(provider)) throw new Error(`No adapter is registered for configured provider: ${provider}`);
+}
 
 let redisClient: ReturnType<typeof createClient> | undefined;
 let stateStore: StateStore;
 if (process.env.REDIS_URL) {
   redisClient = createClient({ url: process.env.REDIS_URL });
-  redisClient.on('error', (error) => console.error('Redis client error', error));
+  redisClient.on('error', (error: Error) => console.error('Redis client error', error));
   await redisClient.connect();
   stateStore = new AtomicRedisStateStore(redisClient as unknown as RedisAtomicClient);
 } else {
@@ -35,8 +37,19 @@ if (process.env.REDIS_URL) {
 const accounts = flattenAccounts(config);
 if (!accounts.length) throw new Error('No enabled gateway accounts are configured');
 const maxBodyBytes = Number(process.env.GATEWAY_REQUEST_BODY_LIMIT_BYTES ?? 1_048_576);
-const gatewayOptions = { accounts, adapters, strategy: config.strategy, maxRetries: config.maxRetries, cooldownMs: config.cooldownMs, stateStore };
-const handler = createGatewayHttpHandler({ ...gatewayOptions, apiKey, maxBodyBytes });
+if (!Number.isInteger(maxBodyBytes) || maxBodyBytes < 1) throw new Error('Invalid GATEWAY_REQUEST_BODY_LIMIT_BYTES');
+
+const gatewayOptions: GatewayHttpServerOptions = {
+  accounts,
+  adapters,
+  strategy: config.strategy,
+  maxRetries: config.maxRetries,
+  cooldownMs: config.cooldownMs,
+  stateStore,
+  apiKey,
+  maxBodyBytes,
+};
+const handler = createGatewayHttpHandler(gatewayOptions);
 
 const server = createServer(async (req, res) => {
   try {
@@ -54,13 +67,31 @@ const server = createServer(async (req, res) => {
       }
       chunks.push(buffer);
     }
+
     const raw = Buffer.concat(chunks).toString('utf8');
-    const body = raw ? JSON.parse(raw) : {};
-    const result = await handler({ method: req.method ?? 'GET', path: req.url ?? '/', body, headers: { authorization: req.headers.authorization, 'x-request-id': req.headers['x-request-id'] as string | undefined } });
+    let body: unknown = {};
+    try {
+      body = raw ? JSON.parse(raw) : {};
+    } catch {
+      res.statusCode = 400;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ error: 'InvalidRequest' }));
+      return;
+    }
+
+    const result = await handler({
+      method: req.method ?? 'GET',
+      path: req.url ?? '/',
+      body,
+      headers: {
+        authorization: req.headers.authorization,
+        'x-request-id': req.headers['x-request-id'] as string | undefined,
+      },
+    });
     res.statusCode = result.status;
     for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
     res.end(JSON.stringify(result.body));
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('HTTP request error', error);
     res.statusCode = 400;
     res.setHeader('content-type', 'application/json');
