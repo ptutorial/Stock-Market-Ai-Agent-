@@ -18,6 +18,7 @@ export class AgentRuntime {
 
   async run(agent: AgentDefinition, context: AgentContext): Promise<AgentResult> {
     const requestId = context.requestId || randomUUID();
+    const allowedTools = new Set(agent.toolNames);
     const toolCalls: ToolCall[] = [];
     const toolResults: AgentResult['toolResults'] = [];
     let prompt = this.buildPrompt(agent, context, toolResults);
@@ -35,6 +36,9 @@ export class AgentRuntime {
       if (!calls.length) break;
 
       for (const call of calls) {
+        if (!allowedTools.has(call.name)) {
+          throw new Error(`Agent ${agent.id} is not permitted to use tool ${call.name}`);
+        }
         const output = await this.options.tools.execute(call.name, call.arguments, {
           requestId,
           agentId: agent.id,
@@ -65,7 +69,7 @@ export class AgentRuntime {
       `EVIDENCE: ${JSON.stringify(context.evidence)}`,
       results.length ? `TOOL_RESULTS: ${JSON.stringify(results)}` : '',
       previous ? `PREVIOUS_RESPONSE: ${previous}` : '',
-      agent.toolNames.length ? 'Use tools when additional evidence is required. Do not fabricate tool results.' : '',
+      agent.toolNames.length ? 'Use only the tools listed in the tool definitions. Do not fabricate tool results.' : '',
       'Return the conclusion and, when structured output is requested, valid JSON only.',
     ].filter(Boolean).join('\n');
   }
