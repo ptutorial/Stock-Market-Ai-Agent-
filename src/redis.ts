@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AccountState } from './domain.js';
-import type { StateStore, RedisLikeClient } from './state.js';
+import type { QuotaUsage, StateStore, RedisLikeClient } from './state.js';
 
 export interface RedisAtomicClient extends RedisLikeClient {
   eval(script: string, numKeys: number, ...args: string[]): Promise<unknown>;
@@ -22,13 +22,13 @@ export class AtomicRedisStateStore implements StateStore {
     const lockKey = `${this.prefix}:lock:${accountId}`;
     const token = randomUUID();
     const acquireDeadline = Date.now() + 5_000;
+    let acquired = false;
     while (Date.now() < acquireDeadline) {
-      const acquired = await this.redis.set(lockKey, token, 'NX', 'PX', 10_000);
-      if (acquired === 'OK') break;
+      const result = await this.redis.set(lockKey, token, 'NX', 'PX', 10_000);
+      if (result === 'OK') { acquired = true; break; }
       await new Promise((resolve) => setTimeout(resolve, 25 + Math.floor(Math.random() * 25)));
     }
-    const owned = await this.redis.get(lockKey) === token;
-    if (!owned) throw new Error(`Timed out acquiring state lock for account ${accountId}`);
+    if (!acquired || await this.redis.get(lockKey) !== token) throw new Error(`Timed out acquiring state lock for account ${accountId}`);
     try {
       const current = await this.get(accountId);
       const next = updater(current);
@@ -47,35 +47,45 @@ export class AtomicRedisStateStore implements StateStore {
       `${this.prefix}:quota:${accountId}:m:${minute}:tokens`,
       `${this.prefix}:quota:${accountId}:d:${day}:requests`,
       `${this.prefix}:quota:${accountId}:d:${day}:tokens`,
-      `${this.prefix}:state:${accountId}`,
     ];
     const script = `
-local mr = redis.call('GET', KEYS[1]) or 0
-local mt = redis.call('GET', KEYS[2]) or 0
-local dr = redis.call('GET', KEYS[3]) or 0
-local dt = redis.call('GET', KEYS[4]) or 0
-local rpm = tonumber(ARGV[1]); local rpd = tonumber(ARGV[2]); local tpm = tonumber(ARGV[3]); local tpd = tonumber(ARGV[4]); local tokens = tonumber(ARGV[5]); local now = tonumber(ARGV[6])
-if rpm >= 0 and tonumber(mr) + 1 > rpm then return 0 end
-if rpd >= 0 and tonumber(dr) + 1 > rpd then return 0 end
-if tpm >= 0 and tonumber(mt) + tokens > tpm then return 0 end
-if tpd >= 0 and tonumber(dt) + tokens > tpd then return 0 end
+local mr = tonumber(redis.call('GET', KEYS[1]) or '0')
+local mt = tonumber(redis.call('GET', KEYS[2]) or '0')
+local dr = tonumber(redis.call('GET', KEYS[3]) or '0')
+local dt = tonumber(redis.call('GET', KEYS[4]) or '0')
+local rpm = tonumber(ARGV[1]); local rpd = tonumber(ARGV[2]); local tpm = tonumber(ARGV[3]); local tpd = tonumber(ARGV[4]); local tokens = math.max(0, tonumber(ARGV[5]))
+if rpm >= 0 and mr + 1 > rpm then return 0 end
+if rpd >= 0 and dr + 1 > rpd then return 0 end
+if tpm >= 0 and mt + tokens > tpm then return 0 end
+if tpd >= 0 and dt + tokens > tpd then return 0 end
 redis.call('INCRBY', KEYS[1], 1)
-redis.call('INCRBY', KEYS[2], tokens)
+if tokens > 0 then redis.call('INCRBY', KEYS[2], tokens) end
 redis.call('INCRBY', KEYS[3], 1)
-redis.call('INCRBY', KEYS[4], tokens)
+if tokens > 0 then redis.call('INCRBY', KEYS[4], tokens) end
 redis.call('EXPIRE', KEYS[1], 61)
 redis.call('EXPIRE', KEYS[2], 61)
 redis.call('EXPIRE', KEYS[3], 86401)
 redis.call('EXPIRE', KEYS[4], 86401)
-local raw = redis.call('GET', KEYS[5])
-local state
-if raw then state = cjson.decode(raw) else state = {requests=0,tokens=0,failures=0,health='healthy'} end
-state.requests = (state.requests or 0) + 1
-state.tokens = (state.tokens or 0) + tokens
-state.lastUsedAt = now
-redis.call('SET', KEYS[5], cjson.encode(state))
 return 1`;
-    const value = await this.redis.eval(script, keys.length, ...keys, String(limits.rpm ?? -1), String(limits.rpd ?? -1), String(limits.tpm ?? -1), String(limits.tpd ?? -1), String(tokens), String(now));
+    const value = await this.redis.eval(script, keys.length, ...keys, String(limits.rpm ?? -1), String(limits.rpd ?? -1), String(limits.tpm ?? -1), String(limits.tpd ?? -1), String(Math.max(0, Math.floor(tokens))), String(now));
     return Number(value) === 1;
+  }
+
+  async getQuotaUsage(accountId: string, now = Date.now()): Promise<QuotaUsage> {
+    const minute = Math.floor(now / 60_000);
+    const day = Math.floor(now / 86_400_000);
+    const keys = [
+      `${this.prefix}:quota:${accountId}:m:${minute}:requests`,
+      `${this.prefix}:quota:${accountId}:m:${minute}:tokens`,
+      `${this.prefix}:quota:${accountId}:d:${day}:requests`,
+      `${this.prefix}:quota:${accountId}:d:${day}:tokens`,
+    ];
+    const values = await Promise.all(keys.map((key) => this.redis.get(key)));
+    return {
+      minuteRequests: Number(values[0] ?? 0),
+      minuteTokens: Number(values[1] ?? 0),
+      dayRequests: Number(values[2] ?? 0),
+      dayTokens: Number(values[3] ?? 0),
+    };
   }
 }
