@@ -141,10 +141,19 @@ export class LLMGateway {
         try { credential = await this.credentialStore.get(account.credentialRef); } catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
         let discovered: ModelInfo[];
         try { discovered = await this.modelRegistry.discover(account, adapter, credential); } catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
+        const quota = this.stateStore.getQuotaUsage ? await this.stateStore.getQuotaUsage(account.id) : undefined;
+        const routingState: AccountState = {
+          ...state,
+          metadata: {
+            ...state.metadata,
+            ...(quota && account.limits?.rpm ? { minuteRequestUtilization: quota.minuteRequests / account.limits.rpm } : {}),
+            ...(quota && account.limits?.tpm ? { minuteTokenUtilization: quota.minuteTokens / account.limits.tpm } : {}),
+          },
+        };
         for (const model of discovered) {
           if (!models.includes(model.id) || model.available === false) continue;
           if (!required.every((capability) => model.capabilities.includes(capability))) continue;
-          result.push({ account, state, adapter, model, score: 0 });
+          result.push({ account, state: routingState, adapter, model, score: 0 });
         }
       }
     }
@@ -173,7 +182,17 @@ export class LLMGateway {
       const now = Date.now();
       const previousLatency = Number(state.metadata?.latencyMs);
       const smoothedLatency = Number.isFinite(previousLatency) && previousLatency > 0 && latencyMs !== undefined ? previousLatency * 0.7 + latencyMs * 0.3 : latencyMs;
-      return { ...state, tokens: state.tokens + tokens, lastUsedAt: now, lastSuccessAt: now, failures: 0, cooldownUntil: undefined, health: 'healthy', metadata: { ...state.metadata, ...(smoothedLatency !== undefined ? { latencyMs: smoothedLatency } : {}) } };
+      return {
+        ...state,
+        requests: state.requests + 1,
+        tokens: state.tokens + Math.max(0, tokens),
+        lastUsedAt: now,
+        lastSuccessAt: now,
+        failures: 0,
+        cooldownUntil: undefined,
+        health: 'healthy',
+        metadata: { ...state.metadata, ...(smoothedLatency !== undefined ? { latencyMs: smoothedLatency } : {}) },
+      };
     });
   }
 
