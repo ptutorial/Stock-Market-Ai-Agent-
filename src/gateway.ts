@@ -10,7 +10,7 @@ export interface CredentialStore { get(credentialRef: string): Promise<string>; 
 export interface UsageSink { record(event: Record<string, unknown>): Promise<void> | void; }
 export class EnvironmentCredentialStore implements CredentialStore { async get(credentialRef: string): Promise<string> { const value = process.env[credentialRef]; if (!value) throw new GatewayError('AuthenticationError', `Credential ${credentialRef} is not configured`); return value; } }
 export class InMemoryUsageSink implements UsageSink { readonly events: Record<string, unknown>[] = []; record(event: Record<string, unknown>): void { this.events.push(event); } }
-export interface GatewayConfig { accounts: AccountConfig[]; adapters: ProviderAdapter[]; strategy?: RoutingStrategy; fallbackProviders?: string[]; maxRetries?: number; cooldownMs?: number; stateStore?: StateStore; modelRegistry?: ModelRegistry; }
+export interface GatewayConfig { accounts: AccountConfig[]; adapters: ProviderAdapter[]; strategy?: RoutingStrategy; providerOrder?: string[]; fallbackProviders?: string[]; maxRetries?: number; cooldownMs?: number; stateStore?: StateStore; modelRegistry?: ModelRegistry; }
 interface Candidate { account: AccountConfig; state: AccountState; adapter: ProviderAdapter; model: ModelInfo; score: number; }
 
 export class LLMGateway {
@@ -74,8 +74,12 @@ export class LLMGateway {
     })();
   }
 
+  private providerOrder(): string[] {
+    return this.cfg.providerOrder ?? this.cfg.fallbackProviders ?? [...this.adapters.keys()];
+  }
+
   private async selectCandidates(request: GenerateRequest): Promise<Candidate[]> {
-    const options = request.options ?? {}; const required: Capability[] = options.capabilities ?? ['chat']; const providerOrder = this.cfg.fallbackProviders ?? [...this.adapters.keys()]; const result: Candidate[] = [];
+    const options = request.options ?? {}; const required: Capability[] = options.capabilities ?? ['chat']; const providerOrder = this.providerOrder(); const result: Candidate[] = [];
     for (const provider of providerOrder) {
       const adapter = this.adapters.get(provider); if (!adapter) continue;
       for (const account of this.cfg.accounts.filter((item) => item.provider === provider && item.enabled !== false)) {
@@ -90,7 +94,7 @@ export class LLMGateway {
         for (const model of discovered) { if (!models.includes(model.id) || model.available === false) continue; if (!required.every((capability) => model.capabilities.includes(capability))) continue; result.push({ account, state: routingState, adapter, model, score: 0 }); }
       }
     }
-    return this.router.rank(result, { task: options.task, capabilities: required, model: options.model });
+    return this.router.rank(result, { task: options.task, capabilities: required, model: options.model, providerOrder });
   }
 
   private estimatedTokens(request: GenerateRequest): number { const options = request.options ?? {}; const input = request.messages?.reduce((sum, message) => sum + Math.ceil(message.content.length / 4), 0) ?? Math.ceil(request.prompt.length / 4); return input + Math.max(0, options.maxTokens ?? 0); }
