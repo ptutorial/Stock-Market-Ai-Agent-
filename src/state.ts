@@ -2,13 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AccountState } from './domain.js';
 
 export interface QuotaUsage { minuteRequests: number; dayRequests: number; minuteTokens: number; dayTokens: number; }
-export interface StateStore {
-  get(accountId: string): Promise<AccountState | undefined>;
-  set(accountId: string, state: AccountState): Promise<void>;
-  update(accountId: string, updater: (current: AccountState | undefined) => AccountState): Promise<AccountState>;
-  reserve(accountId: string, tokens: number, limits: { rpm?: number; rpd?: number; tpm?: number; tpd?: number }, now?: number): Promise<boolean>;
-  getQuotaUsage?(accountId: string, now?: number): Promise<QuotaUsage>;
-}
+export interface StateStore { get(accountId: string): Promise<AccountState | undefined>; set(accountId: string, state: AccountState): Promise<void>; update(accountId: string, updater: (current: AccountState | undefined) => AccountState): Promise<AccountState>; reserve(accountId: string, tokens: number, limits: { rpm?: number; rpd?: number; tpm?: number; tpd?: number }, now?: number): Promise<boolean>; getQuotaUsage?(accountId: string, now?: number): Promise<QuotaUsage>; }
 
 export class InMemoryStateStore implements StateStore {
   private readonly states = new Map<string, AccountState>();
@@ -23,7 +17,7 @@ export class InMemoryStateStore implements StateStore {
   private async withLock<T>(accountId: string, operation: () => Promise<T>): Promise<T> { const previous = this.locks.get(accountId) ?? Promise.resolve(); let release!: () => void; const current = new Promise<void>((resolve) => { release = resolve; }); this.locks.set(accountId, current); await previous; try { return await operation(); } finally { release(); if (this.locks.get(accountId) === current) this.locks.delete(accountId); } }
 }
 
-export interface RedisLikeClient { get(key: string): Promise<string | null>; set(key: string, value: string, ...args: unknown[]): Promise<unknown>; eval?: (script: string, ...args: unknown[]) => Promise<unknown>; }
+export interface RedisLikeClient { get(key: string): Promise<string | null>; set(key: string, value: string, ...args: unknown[]): Promise<unknown>; eval?: (script: string, ...args: any[]) => Promise<unknown>; }
 const RESERVE_SCRIPT = `local mr=tonumber(redis.call('GET',KEYS[1]) or '0'); local mt=tonumber(redis.call('GET',KEYS[2]) or '0'); local dr=tonumber(redis.call('GET',KEYS[3]) or '0'); local dt=tonumber(redis.call('GET',KEYS[4]) or '0'); local t=tonumber(ARGV[1]); local rpm=tonumber(ARGV[2]); local rpd=tonumber(ARGV[3]); local tpm=tonumber(ARGV[4]); local tpd=tonumber(ARGV[5]); if rpm>=0 and mr+1>rpm then return 0 end; if rpd>=0 and dr+1>rpd then return 0 end; if tpm>=0 and mt+t>tpm then return 0 end; if tpd>=0 and dt+t>tpd then return 0 end; redis.call('INCRBY',KEYS[1],1); redis.call('INCRBY',KEYS[3],1); if t>0 then redis.call('INCRBY',KEYS[2],t); redis.call('INCRBY',KEYS[4],t) end; redis.call('EXPIRE',KEYS[1],61); redis.call('EXPIRE',KEYS[2],61); redis.call('EXPIRE',KEYS[3],86401); redis.call('EXPIRE',KEYS[4],86401); return 1`;
 export class RedisStateStore implements StateStore {
   constructor(private readonly redis: RedisLikeClient, private readonly prefix = 'llm-gateway') {}
