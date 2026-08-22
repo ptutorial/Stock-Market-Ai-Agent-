@@ -36,6 +36,12 @@ export interface ToolDefinition {
   inputSchema: Record<string, unknown>;
 }
 
+export interface ToolCall {
+  id?: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
 export interface GenerateOptions {
   model?: string;
   task?: TaskType;
@@ -63,6 +69,7 @@ export interface Usage {
 
 export interface GenerateResult {
   text: string;
+  toolCalls?: ToolCall[];
   provider: ProviderName;
   accountId: string;
   model: string;
