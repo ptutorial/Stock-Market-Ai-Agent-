@@ -18,6 +18,7 @@ export * from './tools.js';
 export * from './agents.js';
 export * from './agent-runtime.js';
 export * from './agent-llm.js';
+export * from './agent-llm-config.js';
 export * from './recommendation.js';
 export * from './recommendation-schema.js';
 export * from './recommendation-orchestrator.js';
