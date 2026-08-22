@@ -56,85 +56,87 @@ LLM Gateway
 The Redis state boundary exists, but cross-process atomic quota reservation remains a production integration requirement.
 
 # Phase 9 — Usage, Cost & Accounting
+**Status:** Implemented — CI verification pending
+
+# Phase 10 — Health Monitoring
 
 **Status:** Implemented — CI verification pending
 
 ### Goals
 
-Normalize provider usage into a consistent request-level accounting model, estimate cost from model/account pricing, and provide aggregated usage reporting without coupling the application to a specific database.
+Track account/provider health, classify failures into actionable health states, quarantine unhealthy accounts, and recover them after successful health checks.
 
 ### Completed
 
-- Added `src/usage.ts`.
-- Added provider-neutral `UsageRecord`.
-- Added `UsageTotals` aggregation contract.
-- Added `UsageStore` interface.
-- Added usage normalization with derived `totalTokens`.
-- Added model-level input/output price calculation.
-- Added account-level pricing fallback when model pricing is unavailable.
-- Added USD as the default accounting currency when no currency is supplied.
-- Added `enrichUsage` for attaching estimated cost to provider usage.
-- Added request-level usage record creation.
-- Added `InMemoryUsageStore`.
-- Added aggregation by account, provider, model and time range.
-- Exported usage APIs from `src/index.ts`.
-- Added tests for token normalization, cost calculation, account pricing fallback and filtered aggregation.
+- Added `src/health.ts`.
+- Added configurable failure thresholds.
+- Added degraded state transitions.
+- Added temporary-unavailable quarantine.
+- Added authentication-failure state.
+- Added rate-limited state with cooldown.
+- Honors provider `Retry-After` when calculating rate-limit cooldown.
+- Added configurable generic cooldown periods.
+- Added successful recovery handling.
+- Added configurable consecutive recovery success threshold.
+- Added routing eligibility check.
+- Added adapter-backed health checks using the existing `ProviderAdapter.healthCheck` contract.
+- Added health transition event history.
+- Exported `HealthMonitor` through `src/index.ts`.
+- Added tests for failure transitions, rate-limit cooldowns, authentication failures, recovery and transition events.
 
-### Accounting flow
-
-```text
-Provider Result
-      |
-      v
-Normalize Usage
-      |
-      +--> input tokens
-      +--> output tokens
-      +--> total tokens
-      |
-      v
-Pricing Resolver
-      |
-      +--> model pricing
-      +--> account pricing fallback
-      |
-      v
-UsageRecord
-      |
-      v
-UsageStore
-      |
-      +--> per-request history
-      +--> account totals
-      +--> provider totals
-      +--> model totals
-      +--> time-range totals
-```
-
-### Cost formula
+### Health state flow
 
 ```text
-estimatedCost =
-  (inputTokens  × inputCostPerMillion  / 1,000,000)
-+ (outputTokens × outputCostPerMillion / 1,000,000)
+Provider Result / Health Check
+            |
+            v
+       normalizeError
+            |
+            +--> Authentication failure
+            |          ↓
+            |   authentication_failure
+            |
+            +--> Rate limit
+            |          ↓
+            |      rate_limited
+            |          ↓
+            |       cooldown
+            |
+            +--> Timeout / provider unavailable
+            |          ↓
+            |   temporarily_unavailable
+            |          ↓
+            |       cooldown
+            |
+            +--> Repeated failures
+                       ↓
+                    degraded
+                       ↓
+              failure threshold
+                       ↓
+             temporarily_unavailable
+
+Successful health check / request
+            ↓
+       recovery counter
+            ↓
+          healthy
 ```
 
 ### Exit criteria
 
-- Provider usage can be normalized. **Complete.**
-- Total tokens can be derived when providers omit them. **Complete.**
-- Model pricing can produce estimated request cost. **Complete.**
-- Account pricing can act as a fallback. **Complete.**
-- Usage can be persisted behind a provider-neutral store interface. **Complete.**
-- Usage can be aggregated by account/provider/model/time range. **Complete.**
+- Account health state is tracked. **Complete.**
+- Authentication failures are quarantined. **Complete.**
+- Rate limits create cooldown state. **Complete.**
+- Provider/timeout failures create temporary quarantine. **Complete.**
+- Repeated failures transition through degraded state. **Complete.**
+- Successful checks can restore health. **Complete.**
+- Router eligibility can consume health state. **Complete.**
 - CI build and test verification. **Pending.**
 
 ### Phase note
 
-Persistent database storage, budget enforcement and production-grade financial reconciliation are intentionally deferred. The accounting contract created here is the foundation for those later capabilities.
-
-# Phase 10 — Health Monitoring
-**Status:** Planned
+Health monitoring provides the state machine and eligibility boundary. Persisting health state across workers is handled by the Phase 8 state-store integration; dashboards, metrics and alerting belong to Phase 11.
 
 # Phase 11 — Observability
 **Status:** Planned
@@ -187,7 +189,7 @@ Phase 6  Rate limits / quotas               [IMPLEMENTED]
 Phase 7  Retry / fallback                   [IMPLEMENTED]
 Phase 8  Concurrency / distributed state    [IMPLEMENTED]
 Phase 9  Usage / cost                       [IMPLEMENTED]
-Phase 10 Health monitoring
+Phase 10 Health monitoring                  [IMPLEMENTED]
 Phase 11 Observability
 Phase 12 Security hardening
 Phase 13 Comprehensive testing
