@@ -57,7 +57,7 @@ export class GeminiAdapter implements ProviderAdapter {
     const candidates = Array.isArray(data.candidates) ? data.candidates : [];
     const parts = candidates[0]?.content?.parts ?? [];
     const text = parts.filter((part: any) => typeof part.text === 'string').map((part: any) => part.text).join('');
-    const toolCalls: ToolCall[] = parts.filter((part: any) => part.functionCall).map((part: any) => ({ id: part.functionCall.name, name: part.functionCall.name, arguments: part.functionCall.args ?? {} }));
+    const toolCalls: ToolCall[] = parts.filter((part: any) => part.functionCall).map((part: any) => ({ name: part.functionCall.name, arguments: part.functionCall.args ?? {} }));
     const usage: Usage = data.usageMetadata ? { inputTokens: data.usageMetadata.promptTokenCount, outputTokens: data.usageMetadata.candidatesTokenCount, totalTokens: data.usageMetadata.totalTokenCount } : {};
     return { text, provider: this.name, accountId: account.id, model: model.id, usage, requestId, latencyMs: Date.now() - started, ...(toolCalls.length ? { toolCalls } : {}) };
   }
@@ -80,7 +80,7 @@ export class GeminiAdapter implements ProviderAdapter {
           const parts = data.candidates?.[0]?.content?.parts ?? [];
           const text = parts.filter((part: any) => typeof part.text === 'string').map((part: any) => part.text).join('');
           if (data.usageMetadata) usage = { inputTokens: data.usageMetadata.promptTokenCount, outputTokens: data.usageMetadata.candidatesTokenCount, totalTokens: data.usageMetadata.totalTokenCount };
-          const toolCalls: ToolCall[] = parts.filter((part: any) => part.functionCall).map((part: any) => ({ id: part.functionCall.name, name: part.functionCall.name, arguments: part.functionCall.args ?? {} }));
+          const toolCalls: ToolCall[] = parts.filter((part: any) => part.functionCall).map((part: any) => ({ name: part.functionCall.name, arguments: part.functionCall.args ?? {} }));
           if (text || toolCalls.length) yield { text, ...(toolCalls.length ? { toolCalls } : {}), ...(usage ? { usage } : {}) };
         }
       }
