@@ -111,23 +111,6 @@ Stop assuming that every model supports every feature and provide a reusable mod
 - Exported `ModelRegistry` from the public package API.
 - Added unit tests for cache reuse, forced refresh, invalidation and capability filtering.
 
-### Discovery model
-
-```text
-Provider Adapter
-      |
-      v
-ModelRegistry
-      |
-      +--> Discover models
-      +--> Normalize metadata
-      +--> Cache with TTL
-      +--> Refresh / invalidate
-      |
-      v
-Routing Engine
-```
-
 ### Exit criteria
 
 - Provider model discovery is available through a common registry. **Complete.**
@@ -137,49 +120,72 @@ Routing Engine
 - Capability filtering cannot add capabilities that the account does not permit. **Complete.**
 - CI build and test verification. **Pending.**
 
-### Phase note
-
-The registry is intentionally introduced as a standalone component. Full routing integration and advanced capability-aware selection belong to Phase 5.
-
 ---
 
 # Phase 5 — Account Selection & Routing Engine
 
-**Status:** Planned
+**Status:** Implemented — CI verification pending
 
 ### Goals
 
-Build the intelligent selection engine described in the specification.
+Build a provider-neutral routing engine that selects an eligible account/model using capability requirements, account health, availability and configurable routing strategy.
 
-### Routing strategies
+### Completed
 
-Implement and test:
+- Added `src/router.ts` with `ModelRouter`.
+- Added candidate generation from accounts, account states, provider adapters and discovered models.
+- Added filtering for disabled accounts.
+- Added filtering for unhealthy/disabled accounts.
+- Added cooldown filtering.
+- Added unavailable-model filtering.
+- Added explicit model filtering.
+- Added capability-aware filtering from request capabilities.
+- Added task-to-capability mapping for vision and structured output tasks.
+- Added priority routing.
+- Added round-robin routing.
+- Added least-recently-used routing.
+- Added lowest-utilization routing.
+- Added fastest routing hook.
+- Added cheapest routing.
+- Added deterministic ranking through a numeric routing score.
+- Exported routing APIs from `src/index.ts`.
+- Added routing tests covering eligibility, priority, round robin and candidate generation.
 
-- Priority.
-- Round robin.
-- Least recently used.
-- Lowest recent utilization.
-- Fastest provider.
-- Cheapest provider.
-- Best model.
-- Capability-based routing.
+### Routing flow
 
-### Tasks
-
-- Build candidate generation.
-- Filter disabled accounts.
-- Filter unhealthy accounts.
-- Filter cooling-down accounts.
-- Filter incompatible capabilities.
-- Filter unavailable models.
-- Calculate routing score.
-- Make strategy configurable.
-- Make provider fallback order configurable.
-- Add deterministic routing tests.
+```text
+Generate Request
+      |
+      v
+Candidate Generation
+      |
+      +--> account enabled?
+      +--> account healthy?
+      +--> cooldown expired?
+      +--> model available?
+      +--> model requested?
+      +--> capabilities compatible?
+      |
+      v
+Strategy Scoring
+      |
+      v
+Selected Account + Model + Adapter
+```
 
 ### Exit criteria
 
-For every request the router can explain why a provider/account/model was selected without exposing credentials.
+- Disabled/unhealthy/cooling-down capacity is excluded. **Complete.**
+- Capability-incompatible models are excluded. **Complete.**
+- Configurable routing strategy exists. **Complete.**
+- Provider-specific branches are absent from application-facing routing. **Complete.**
+- Selection does not expose credentials. **Complete.**
+- Deterministic routing tests exist. **Complete.**
+- CI build and test verification. **Pending.**
+
+### Phase note
+
+Rate-limit-aware capacity accounting, distributed state, retry/fallback and health transitions are deliberately deferred to Phases 6–10. The router currently consumes the `AccountState` supplied to it rather than owning distributed capacity state.
 
 ---
 
@@ -225,49 +231,6 @@ The gateway respects known provider limits and returns a clear error when no eli
 
 Make failures recoverable without creating retry storms or incorrect fallbacks.
 
-### Retryable failures
-
-- Rate limit.
-- Timeout.
-- Connection failure.
-- Temporary provider outage.
-- Provider 5xx.
-- Temporarily unavailable model.
-
-### Non-blind-fallback failures
-
-- Invalid request.
-- Authentication failure.
-- Unsupported capability.
-- Malformed input.
-
-### Tasks
-
-- Normalize errors.
-- Define retryability.
-- Add exponential backoff.
-- Add jitter.
-- Respect `Retry-After`.
-- Limit retry count.
-- Configure fallback chain.
-- Track retry count.
-- Track fallback count.
-- Prevent retry storms.
-- Test provider outage scenarios.
-
-### Example
-
-```text
-Gemini
-  -> Groq
-  -> OpenRouter
-  -> Cloudflare
-```
-
-### Exit criteria
-
-Temporary failures can recover through retry or fallback while invalid requests are not silently transformed into unrelated provider requests.
-
 ---
 
 # Phase 8 — Concurrency & Distributed State
@@ -277,23 +240,6 @@ Temporary failures can recover through retry or fallback while invalid requests 
 ### Goals
 
 Make account selection safe when multiple workers issue requests concurrently.
-
-### Tasks
-
-- Define atomic account-state updates.
-- Prevent concurrent over-allocation.
-- Protect rate-limit counters.
-- Protect cooldown state.
-- Protect health transitions.
-- Protect routing cursors.
-- Define in-memory implementation for single process.
-- Define Redis-backed state implementation for distributed deployments.
-- Add locking/reservation strategy where necessary.
-- Test concurrent requests.
-
-### Exit criteria
-
-Multiple workers cannot incorrectly treat one account as having unlimited capacity.
 
 ---
 
@@ -305,45 +251,6 @@ Multiple workers cannot incorrectly treat one account as having unlimited capaci
 
 Create reliable request-level accounting.
 
-### Request metadata
-
-Track:
-
-- Request ID.
-- Provider.
-- Account identifier.
-- Model.
-- Task type.
-- Start time.
-- End time.
-- Latency.
-- Input tokens.
-- Output tokens.
-- Total tokens.
-- HTTP status.
-- Success/failure.
-- Retry count.
-- Fallback count.
-- Error category.
-
-### Cost tracking
-
-Track when pricing is available:
-
-- Provider.
-- Model.
-- Input tokens.
-- Output tokens.
-- Estimated cost.
-- Currency.
-- Pricing version/source metadata.
-
-Do not permanently classify a model as free without current provider evidence.
-
-### Exit criteria
-
-Usage can be queried without exposing credentials or sensitive prompt/response content.
-
 ---
 
 # Phase 10 — Health Monitoring
@@ -354,65 +261,15 @@ Usage can be queried without exposing credentials or sensitive prompt/response c
 
 Maintain reliable provider/account health state.
 
-### Health states
-
-- Healthy.
-- Degraded.
-- Rate limited.
-- Authentication failure.
-- Temporarily unavailable.
-- Disabled.
-
-### Tasks
-
-- Track successful requests.
-- Track failures.
-- Track consecutive failures.
-- Add cooldowns.
-- Add health checks.
-- Recover accounts automatically after successful checks/requests.
-- Avoid repeatedly probing known-bad providers.
-- Add provider health metrics.
-
-### Exit criteria
-
-The router automatically avoids unhealthy capacity and can restore recovered capacity.
-
 ---
 
 # Phase 11 — Observability
 
 **Status:** Planned
 
-### Metrics
+### Goals
 
-- Requests/provider.
-- Requests/account.
-- Requests/model.
-- Success rate.
-- Failure rate.
-- Average latency.
-- P95 latency.
-- Token usage.
-- Retry rate.
-- Fallback rate.
-- Rate-limit events.
-- Provider availability.
-- Estimated cost.
-
-### Tasks
-
-- Add structured logging.
-- Add metrics abstraction.
-- Add tracing hooks.
-- Add OpenTelemetry integration.
-- Add Prometheus-compatible metrics endpoint if deployed as a service.
-- Correlate logs using request IDs.
-- Ensure credentials and sensitive content never enter telemetry.
-
-### Exit criteria
-
-A failed request can be traced from gateway request through provider/account/model selection without exposing secrets.
+Provide metrics, structured logs and tracing without exposing credentials or sensitive prompt/response content.
 
 ---
 
@@ -420,25 +277,9 @@ A failed request can be traced from gateway request through provider/account/mod
 
 **Status:** Planned
 
-### Tasks
+### Goals
 
-- Secret redaction middleware.
-- Authorization-header protection.
-- Secure configuration validation.
-- Credential rotation support.
-- Credential-provider abstraction.
-- Audit logging without secrets.
-- Prompt/response retention controls.
-- Input-size limits.
-- Output-size limits where appropriate.
-- SSRF protection for provider configuration if custom endpoints are ever supported.
-- Dependency vulnerability scanning.
-- Static analysis.
-- Security-focused tests.
-
-### Exit criteria
-
-Security review confirms that credentials, sensitive request data and provider internals are not unintentionally exposed.
+Protect credentials, sensitive request data and provider internals.
 
 ---
 
@@ -446,65 +287,9 @@ Security review confirms that credentials, sensitive request data and provider i
 
 **Status:** Planned
 
-### Test layers
+### Goals
 
-#### Unit tests
-
-- Account selection.
-- Provider selection.
-- Capability filtering.
-- Priority routing.
-- Round robin.
-- LRU.
-- Utilization routing.
-- Cost routing.
-- Retry logic.
-- Backoff.
-- Fallback.
-- Health transitions.
-- Cooldowns.
-- Usage accounting.
-- Cost accounting.
-- Error normalization.
-
-#### Adapter tests
-
-Use mocked HTTP/provider responses only.
-
-Test:
-
-- Successful completion.
-- Streaming.
-- Authentication error.
-- Rate limit.
-- Timeout.
-- 4xx.
-- 5xx.
-- Invalid response.
-- Usage extraction.
-- Rate-limit header extraction.
-- Capability reporting.
-
-#### Integration tests
-
-- Multiple providers.
-- Multiple accounts.
-- Fallback chains.
-- Concurrent requests.
-- Recovery after failure.
-- Configuration validation.
-
-#### Security tests
-
-- Secret leakage.
-- Log redaction.
-- Error-message redaction.
-- Credential isolation.
-- Sensitive telemetry protection.
-
-### Exit criteria
-
-All tests run without real provider API calls in CI unless an explicitly separate integration environment is introduced.
+Build unit, adapter, integration and security test coverage across the complete gateway.
 
 ---
 
@@ -514,31 +299,7 @@ All tests run without real provider API calls in CI unless an explicitly separat
 
 ### Goals
 
-Make the gateway easy to consume from applications.
-
-### Tasks
-
-- Stable public API.
-- `generate()` API.
-- `stream()` API.
-- Model discovery API.
-- Health API.
-- Usage API.
-- Typed errors.
-- Typed configuration.
-- Provider-neutral options.
-- Examples.
-- Migration documentation.
-
-### Example
-
-```ts
-const result = await gateway.generate('coding', prompt, {
-  capabilities: ['chat', 'structured_output']
-});
-```
-
-Application code must not need provider-specific branches.
+Make the gateway easy to consume from applications through a stable provider-neutral API.
 
 ---
 
@@ -546,19 +307,11 @@ Application code must not need provider-specific branches.
 
 **Status:** Optional / Later
 
-### Goals
-
-Expose the gateway as a standalone internal service when multiple applications need to share it.
-
 ---
 
 # Phase 16 — Redis & Production Scaling
 
 **Status:** Optional / Later
-
-### Goals
-
-Support multiple gateway instances safely.
 
 ---
 
@@ -602,7 +355,7 @@ Phase 3  Provider adapter SDK               [IMPLEMENTED]
    |
 Phase 4  Model / capability discovery       [IMPLEMENTED]
    |
-Phase 5  Routing engine
+Phase 5  Routing engine                     [IMPLEMENTED]
    |
 Phase 6  Rate limits / quotas
    |
