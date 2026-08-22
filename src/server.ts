@@ -58,9 +58,19 @@ const checkHealth = async () => {
     if (!adapter) return;
     const credential = await credentialStore.get(account.credentialRef).catch(() => undefined);
     if (!credential) return;
-    const state = await stateStore.get(account.id) ?? { requests: 0, tokens: 0, failures: 0, health: 'healthy' as const };
-    const next = await healthMonitor.check(account.id, account, adapter, credential, state);
-    await stateStore.set(account.id, next);
+    const current = await stateStore.get(account.id) ?? { requests: 0, tokens: 0, failures: 0, health: 'healthy' as const };
+    const checked = await healthMonitor.check(account.id, account, adapter, credential, current);
+    await stateStore.update(account.id, (latest) => {
+      const state = latest ?? current;
+      return {
+        ...state,
+        health: checked.health,
+        cooldownUntil: checked.cooldownUntil,
+        lastSuccessAt: checked.lastSuccessAt ?? state.lastSuccessAt,
+        lastFailureAt: checked.lastFailureAt ?? state.lastFailureAt,
+        failures: checked.health === 'healthy' ? 0 : Math.max(state.failures, checked.failures),
+      };
+    });
   }));
 };
 
