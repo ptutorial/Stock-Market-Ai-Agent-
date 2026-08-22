@@ -11,7 +11,8 @@ export class RecommendationEngine {
   async recommend(input: { symbol: string; exchange?: string; horizon?: string; data?: Record<string, unknown> }): Promise<Recommendation> {
     const requestId = randomUUID();
     const exchange = input.exchange ?? 'NSE';
-    const context: AgentContext = { requestId, symbol: input.symbol, exchange, horizon: input.horizon ?? '1-3_months', input: input.data ?? {}, evidence: {} };
+    const horizon = input.horizon ?? '1-3_months';
+    const context: AgentContext = { requestId, symbol: input.symbol, exchange, horizon, input: input.data ?? {}, evidence: {} };
     const specialistResults: AgentResult[] = [];
     for (const id of ['technical', 'fundamental', 'news', 'sector', 'risk']) { const agent = this.options.agents.get(id); if (!agent) throw new Error(`Required agent ${id} is not registered`); specialistResults.push(await this.options.runtime.run(agent, context)); }
     const conclusions = Object.fromEntries(specialistResults.map((result) => [result.role, result.output]));
@@ -21,7 +22,7 @@ export class RecommendationEngine {
     const draftResult = await this.options.runtime.run(recommendationAgent, synthesisContext);
     const critiqueResult = await this.options.runtime.run(criticAgent, { ...synthesisContext, evidence: { ...synthesisContext.evidence, draft: draftResult.output } });
     const finalResult = await this.options.runtime.run(finalAgent, { ...synthesisContext, evidence: { ...synthesisContext.evidence, draft: draftResult.output, critique: critiqueResult.output } });
-    return normalizeRecommendation(finalResult.structured, { symbol: input.symbol, exchange, horizon: context.horizon, requestId, conclusions, draft: draftResult.output, critique: critiqueResult.output });
+    return normalizeRecommendation(finalResult.structured, { symbol: input.symbol, exchange, horizon, requestId, conclusions, draft: draftResult.output, critique: critiqueResult.output });
   }
 }
 
