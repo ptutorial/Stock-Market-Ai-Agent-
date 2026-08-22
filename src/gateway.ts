@@ -122,7 +122,8 @@ export class LLMGateway {
   }
 
   private async selectCandidates(request: GenerateRequest): Promise<Candidate[]> {
-    const required: Capability[] = request.options?.capabilities ?? ['chat'];
+    const options = request.options ?? {};
+    const required: Capability[] = options.capabilities ?? ['chat'];
     const providerOrder = this.cfg.fallbackProviders ?? [...this.adapters.keys()];
     const result: Candidate[] = [];
     for (const provider of providerOrder) {
@@ -132,7 +133,7 @@ export class LLMGateway {
         const state = await this.stateStore.get(account.id) ?? { requests: 0, tokens: 0, failures: 0, health: 'healthy' as const };
         if (state.health === 'disabled' || state.health === 'authentication_failure' || (state.cooldownUntil ?? 0) > Date.now()) continue;
         if (!required.every((capability) => account.capabilities.includes(capability))) continue;
-        const models = request.options?.model ? account.models.filter((model) => model === request.options.model) : account.models;
+        const models = options.model ? account.models.filter((model) => model === options.model) : account.models;
         if (!models.length) continue;
         let credential: string;
         try { credential = await this.credentialStore.get(account.credentialRef); } catch (error) { await this.markFailure(account.id, normalizeError(error)); continue; }
@@ -145,12 +146,13 @@ export class LLMGateway {
         }
       }
     }
-    return this.router.rank(result, { task: request.options?.task, capabilities: required, model: request.options?.model });
+    return this.router.rank(result, { task: options.task, capabilities: required, model: options.model });
   }
 
   private estimatedTokens(request: GenerateRequest): number {
+    const options = request.options ?? {};
     const input = request.messages?.reduce((sum, message) => sum + Math.ceil(message.content.length / 4), 0) ?? Math.ceil(request.prompt.length / 4);
-    return input + Math.max(0, request.options?.maxTokens ?? 0);
+    return input + Math.max(0, options.maxTokens ?? 0);
   }
 
   private async markSuccess(id: string, tokens: number, latencyMs?: number): Promise<void> {
