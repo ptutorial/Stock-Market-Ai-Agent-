@@ -4,26 +4,6 @@
 
 This document is the phased implementation roadmap for the multi-provider cloud LLM gateway. Each phase is implemented independently and verified before the next phase is started.
 
-## Target Architecture
-
-```text
-Application
-    |
-    v
-LLM Gateway
-    |
-    +--> Request / Capability Resolver
-    +--> Model Registry / Discovery
-    +--> Model Router
-    +--> Account Selector
-    +--> Rate Limit / Quota Tracker
-    +--> Retry / Backoff
-    +--> Provider Fallback
-    +--> Concurrency / State Store
-    +--> Usage / Cost Tracking
-    +--> Health State
-```
-
 # Phase 0 — Repository Foundation
 **Status:** Complete
 
@@ -59,87 +39,77 @@ The Redis state boundary exists, but cross-process atomic quota reservation rema
 **Status:** Implemented — CI verification pending
 
 # Phase 10 — Health Monitoring
+**Status:** Implemented — CI verification pending
+
+# Phase 11 — Observability
 
 **Status:** Implemented — CI verification pending
 
 ### Goals
 
-Track account/provider health, classify failures into actionable health states, quarantine unhealthy accounts, and recover them after successful health checks.
+Provide provider-neutral telemetry for requests, latency, tokens, estimated cost, failures and health operations without exposing credentials or sensitive request content.
 
 ### Completed
 
-- Added `src/health.ts`.
-- Added configurable failure thresholds.
-- Added degraded state transitions.
-- Added temporary-unavailable quarantine.
-- Added authentication-failure state.
-- Added rate-limited state with cooldown.
-- Honors provider `Retry-After` when calculating rate-limit cooldown.
-- Added configurable generic cooldown periods.
-- Added successful recovery handling.
-- Added configurable consecutive recovery success threshold.
-- Added routing eligibility check.
-- Added adapter-backed health checks using the existing `ProviderAdapter.healthCheck` contract.
-- Added health transition event history.
-- Exported `HealthMonitor` through `src/index.ts`.
-- Added tests for failure transitions, rate-limit cooldowns, authentication failures, recovery and transition events.
+- Added `src/observability.ts`.
+- Added `MetricLabels` for provider/account/model/operation/status/error dimensions.
+- Added request observation contract with correlation `requestId`.
+- Added counter metrics.
+- Added latency histogram metrics with count, sum, minimum and maximum.
+- Added request event capture.
+- Added request metric recording helper.
+- Added token and estimated-cost counters.
+- Added `InMemoryMetrics` for local/test use.
+- Added `NoopObservability` for zero-overhead disabled telemetry.
+- Added error sanitization that retains category/message without copying arbitrary error object fields.
+- Exported observability APIs from `src/index.ts`.
+- Added tests for request metrics, labeled aggregation and error sanitization.
 
-### Health state flow
+### Metrics
 
 ```text
-Provider Result / Health Check
-            |
-            v
-       normalizeError
-            |
-            +--> Authentication failure
-            |          ↓
-            |   authentication_failure
-            |
-            +--> Rate limit
-            |          ↓
-            |      rate_limited
-            |          ↓
-            |       cooldown
-            |
-            +--> Timeout / provider unavailable
-            |          ↓
-            |   temporarily_unavailable
-            |          ↓
-            |       cooldown
-            |
-            +--> Repeated failures
-                       ↓
-                    degraded
-                       ↓
-              failure threshold
-                       ↓
-             temporarily_unavailable
+Requests:
+  gateway_requests_total
 
-Successful health check / request
-            ↓
-       recovery counter
-            ↓
-          healthy
+Latency:
+  gateway_request_latency_ms
+
+Tokens:
+  gateway_tokens_total
+
+Estimated cost:
+  gateway_estimated_cost_total
 ```
+
+### Telemetry flow
+
+```text
+Gateway operation
+      |
+      v
+RequestObservation
+      |
+      +--> request counter
+      +--> latency histogram
+      +--> token counter
+      +--> cost counter
+      +--> optional event sink
+```
+
+### Security boundary
+
+Observability records identifiers and aggregate usage data, but does not automatically record prompts, model responses, credentials, API keys or arbitrary provider error objects. Production sinks can implement `ObservabilitySink` for OpenTelemetry, Prometheus, structured logs or another telemetry system without coupling the gateway core to a vendor.
 
 ### Exit criteria
 
-- Account health state is tracked. **Complete.**
-- Authentication failures are quarantined. **Complete.**
-- Rate limits create cooldown state. **Complete.**
-- Provider/timeout failures create temporary quarantine. **Complete.**
-- Repeated failures transition through degraded state. **Complete.**
-- Successful checks can restore health. **Complete.**
-- Router eligibility can consume health state. **Complete.**
+- Request count metrics available. **Complete.**
+- Latency measurements available. **Complete.**
+- Provider/account/model dimensions available. **Complete.**
+- Token and estimated-cost metrics available. **Complete.**
+- Failure category dimension available. **Complete.**
+- Request correlation ID supported. **Complete.**
+- Sensitive error object fields are not copied into telemetry. **Complete.**
 - CI build and test verification. **Pending.**
-
-### Phase note
-
-Health monitoring provides the state machine and eligibility boundary. Persisting health state across workers is handled by the Phase 8 state-store integration; dashboards, metrics and alerting belong to Phase 11.
-
-# Phase 11 — Observability
-**Status:** Planned
 
 # Phase 12 — Security Hardening
 **Status:** Planned
@@ -190,7 +160,7 @@ Phase 7  Retry / fallback                   [IMPLEMENTED]
 Phase 8  Concurrency / distributed state    [IMPLEMENTED]
 Phase 9  Usage / cost                       [IMPLEMENTED]
 Phase 10 Health monitoring                  [IMPLEMENTED]
-Phase 11 Observability
+Phase 11 Observability                     [IMPLEMENTED]
 Phase 12 Security hardening
 Phase 13 Comprehensive testing
 Phase 14 Developer API / SDK
