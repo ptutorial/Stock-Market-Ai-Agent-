@@ -4,6 +4,7 @@ export * from './config.js';
 export * from './model-registry.js';
 export * from './router.js';
 export * from './limits.js';
+export * from './retry.js';
 export * from './gateway.js';
 export { GeminiAdapter } from './providers/gemini.js';
 export { GroqAdapter, OpenRouterAdapter } from './providers/openai-compatible.js';
