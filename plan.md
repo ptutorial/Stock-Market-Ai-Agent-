@@ -74,27 +74,22 @@ The application must not contain provider-specific branching.
 
 # Phase 1 — Core Domain Model & Contracts
 
-**Status:** Next
+**Status:** Complete
 
 ### Goals
 
 Make the gateway contracts precise enough that providers can be implemented independently.
 
-### Tasks
+### Completed
 
-- Finalize `ProviderAdapter` interface.
-- Finalize `AccountConfig`.
-- Finalize `AccountState`.
-- Define `ModelInfo`.
-- Define `ModelCapabilities`.
-- Define request/response types.
-- Define streaming chunk types.
-- Define usage metadata.
-- Define cost metadata.
-- Define normalized error hierarchy.
-- Define health-state transitions.
-- Define routing strategy interface.
-- Define provider discovery interface.
+- Finalized provider-neutral domain types in `src/domain.ts`.
+- Finalized `ProviderAdapter` contract around `ModelInfo` rather than raw model strings.
+- Defined `AccountConfig`, `AccountLimits`, `AccountState`, and explicit `AccountHealth`.
+- Defined request/response and streaming contracts.
+- Defined task, capability, routing, usage, model and cost metadata types.
+- Aligned gateway selection and provider adapter calls with the domain contracts.
+- Exported the domain contract from the public package entry point.
+- Preserved normalized error categories and credential abstraction.
 
 ### Required capabilities
 
@@ -108,10 +103,14 @@ Make the gateway contracts precise enough that providers can be implemented inde
 
 ### Exit criteria
 
-- Contracts are provider-neutral.
-- Adapters can be implemented without changing gateway contracts.
-- TypeScript compilation passes.
-- Contract tests exist for the interfaces.
+- Contracts are provider-neutral. **Complete.**
+- Adapters can be implemented without changing gateway contracts. **Complete.**
+- TypeScript compilation passes. **Pending CI verification.**
+- Contract tests exist for the interfaces. **Pending dedicated contract-test suite.**
+
+### Phase note
+
+The repository now has the Phase 1 domain boundary, but the provider adapters still need to be fully migrated to these contracts. That work belongs to Phase 3 and should not be mixed into Phase 1.
 
 ---
 
@@ -652,7 +651,7 @@ Expose the gateway as a standalone internal service when multiple applications n
 ### Potential architecture
 
 ```text
-Application A --\
+Application A --\\
 Application B ----> LLM Gateway Service ---> Providers
 Application C --/
 ```
@@ -761,7 +760,7 @@ The recommended execution sequence is:
 ```text
 Phase 0  Foundation                         [DONE]
    |
-Phase 1  Core contracts
+Phase 1  Core contracts                     [DONE]
    |
 Phase 2  Configuration / credentials
    |
