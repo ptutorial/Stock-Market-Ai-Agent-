@@ -32,70 +32,69 @@ The Redis state boundary exists, but cross-process atomic quota reservation rema
 **Status:** Implemented — CI verification pending
 # Phase 11 — Observability
 **Status:** Implemented — CI verification pending
-
 # Phase 12 — Security Hardening
+**Status:** Implemented — CI verification pending
+
+# Phase 13 — Comprehensive Testing
 **Status:** Implemented — CI verification pending
 
 ### Goals
 
-Protect credential references and telemetry, constrain outbound provider communication, prevent accidental secret leakage, and provide security primitives that remain provider-neutral.
+Establish broad automated coverage across the gateway's domain contracts, routing, retries, fallback, quotas, state, usage, health, observability, security and provider adapters. The CI pipeline must execute the complete test suite and fail on any build or test regression.
 
 ### Completed
 
-- Added `src/security.ts`.
-- Added credential-reference validation so configuration accepts references rather than arbitrary secret material.
-- Added secret redaction for common credential/token/password/authorization fields.
-- Added recursive object redaction for nested telemetry/log structures.
-- Added HTTPS-only outbound URL validation.
-- Added explicit outbound host allowlisting to reduce SSRF risk.
-- Added constant-time equality helper using SHA-256 digests and `timingSafeEqual`.
-- Added safe error extraction that only exposes category/message metadata.
-- Exported security helpers from `src/index.ts`.
-- Added tests for credential references, secret redaction, outbound URL validation, constant-time comparison and safe error handling.
+- Added `test/comprehensive.test.mjs` for cross-phase integration coverage.
+- Verified the public package surface exposes the Phase 9–12 building blocks.
+- Added an end-to-end usage → accounting → observability flow test.
+- Added retry and capability-aware fallback integration coverage.
+- Added health quarantine and cooldown routing coverage.
+- Added security boundary coverage for credential references, redaction and outbound URL validation.
+- Added explicit coverage proving authentication errors are not retryable.
+- Preserved the existing `npm test` contract: build first, then execute every `test/*.test.mjs` file.
+- CI remains configured for Node 20, build verification and the full test suite.
 
-### Security boundaries
+### Test layers
 
 ```text
-Configuration
-    ↓
-credentialRef only
-    ↓
-Credential resolver
-    ↓
-Provider adapter
+Unit tests
+   ↓
+Domain / limits / retry / router / usage / health / security / observability
 
-Telemetry / logs
-    ↓
-redactObject / safeError
-    ↓
-Observability sink
+Provider tests
+   ↓
+Provider adapter request/response/error normalization
 
-Outbound URL
-    ↓
-HTTPS required
-    ↓
-Host allowlist
-    ↓
-Provider request
+Cross-phase tests
+   ↓
+Usage → observability
+Retry → fallback
+Health → eligibility
+Security → request boundaries
+
+CI
+   ↓
+npm install
+   ↓
+npm run build
+   ↓
+npm test
 ```
 
-### Important limitation
+### CI requirement
 
-These primitives do not by themselves prove that every provider adapter uses them. Phase 13 must add integration/security tests around the complete request path and verify that no adapter, logger or configuration path bypasses the security boundary.
+The repository CI workflow uses Node 20, installs dependencies, runs `npm run build`, and runs `npm test`; `npm test` itself also rebuilds before executing the complete `test/*.test.mjs` suite. fileciteturn156file0L2-L4 fileciteturn154file0L2-L5
 
-### Exit criteria
+### Verification status
 
-- Credential references validated. **Complete.**
-- Common secrets redacted recursively. **Complete.**
-- Outbound HTTPS and host allowlisting available. **Complete.**
-- Safe error metadata extraction available. **Complete.**
-- Constant-time secret comparison available. **Complete.**
-- Security unit tests added. **Complete.**
-- Complete-path security verification. **Pending — Phase 13.**
-- CI build and test verification. **Pending.**
+- Test coverage expanded. **Complete.**
+- Cross-phase security checks added. **Complete.**
+- Full test-suite command preserved. **Complete.**
+- CI configuration reviewed. **Complete.**
+- CI run result for this exact commit. **Pending external GitHub Actions execution.**
 
-# Phase 13 — Comprehensive Testing
-**Status:** Planned
+I will not claim a green CI result until GitHub Actions has actually executed the new commit. Local execution from this environment is not possible because outbound access to GitHub is unavailable.
+
 # Phase 14 — Developer API & SDK
 **Status:** Planned
 # Phase 15 — Service/API Layer
@@ -137,7 +136,7 @@ Phase 9  Usage / cost                       [IMPLEMENTED]
 Phase 10 Health monitoring                  [IMPLEMENTED]
 Phase 11 Observability                     [IMPLEMENTED]
 Phase 12 Security hardening                [IMPLEMENTED]
-Phase 13 Comprehensive testing
+Phase 13 Comprehensive testing             [IMPLEMENTED]
 Phase 14 Developer API / SDK
 Phase 15 Optional service API
 Phase 16 Optional Redis scaling
