@@ -33,7 +33,10 @@ export async function request(url: string, options: HttpRequestOptions = {}): Pr
   const signal = options.signal;
   const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   try {
-    return await fetch(url, { ...options, signal: combined });
+    // Provider endpoints are explicitly configured by adapters. Never follow a redirect
+    // automatically: redirects can otherwise move credential-bearing requests to an
+    // unintended host and bypass the adapter's endpoint trust boundary.
+    return await fetch(url, { ...options, redirect: 'error', signal: combined });
   } catch (error) {
     if (controller.signal.aborted && !signal?.aborted) {
       throw new GatewayError('TimeoutError', `Provider request timed out after ${options.timeoutMs}ms`, true);
