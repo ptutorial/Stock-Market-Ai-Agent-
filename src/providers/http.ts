@@ -5,7 +5,7 @@ export interface HttpRequestOptions extends RequestInit {
   timeoutMs?: number;
 }
 
-function statusError(response: Response, detail = ''): GatewayError {
+function statusError(response: Response): GatewayError {
   const retryAfter = response.headers.get('retry-after');
   const retryAfterMs = retryAfter && /^\d+(\.\d+)?$/.test(retryAfter)
     ? Number(retryAfter) * 1000
@@ -21,7 +21,7 @@ function statusError(response: Response, detail = ''): GatewayError {
           : 'InvalidRequestError';
   return new GatewayError(
     category,
-    `Provider returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 500)}` : ''}`,
+    `Provider returned HTTP ${response.status}`,
     response.status === 429 || response.status >= 500,
     retryAfterMs,
   );
@@ -50,9 +50,8 @@ export async function request(url: string, options: HttpRequestOptions = {}): Pr
 
 export async function readJson(response: Response): Promise<Record<string, any>> {
   if (!response.ok) {
-    let detail = '';
-    try { detail = JSON.stringify(await response.json()); } catch { try { detail = await response.text(); } catch { /* ignore */ } }
-    throw statusError(response, detail);
+    try { await response.arrayBuffer(); } catch { /* ignore unreadable provider body */ }
+    throw statusError(response);
   }
   try {
     return await response.json() as Record<string, any>;
@@ -76,9 +75,8 @@ export function messages(request: GenerateRequest) {
 
 export async function streamSSE(response: Response): Promise<AsyncIterable<StreamChunk>> {
   if (!response.ok) {
-    let detail = '';
-    try { detail = await response.text(); } catch { /* ignore */ }
-    throw statusError(response, detail);
+    try { await response.arrayBuffer(); } catch { /* ignore unreadable provider body */ }
+    throw statusError(response);
   }
   if (!response.body) throw new GatewayError('ProviderUnavailableError', 'Provider returned an empty streaming body', true);
   const reader = response.body.getReader();
