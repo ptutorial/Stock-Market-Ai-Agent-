@@ -1,4 +1,4 @@
-export * from './gateway.js';
+export * from './gateway/index.js';
 export * from '../../router.js';
 export * from '../../limits.js';
 export * from '../../retry.js';
