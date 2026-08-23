@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { loadEnvFile } from 'node:process';
+import { resolve } from 'node:path';
 import { createClient } from 'redis';
 import { createGatewayHttpHandler, type GatewayHttpServerOptions } from './http.js';
 import { flattenAccounts, loadConfigFromEnvironment } from './config.js';
@@ -14,8 +15,9 @@ import { EnvironmentCredentialStore } from './gateway.js';
 import { HealthMonitor } from './health.js';
 
 function loadEnvironment(): void {
+  const envFile = resolve(process.cwd(), '.env');
   try {
-    loadEnvFile();
+    loadEnvFile(envFile);
   } catch (error: unknown) {
     const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
     if (code !== 'ENOENT') throw error;
