@@ -1,4 +1,4 @@
-import type { Capability, TaskType, ToolDefinition, ToolCall } from '../../../domain.js';
+import type { Capability, GenerateOptions, TaskType, ToolDefinition, ToolCall } from '../../../domain.js';
 import type { AgentRole } from '../../agents/registry.js';
 
 export type LLMProvider = 'gemini' | 'groq' | 'openrouter' | 'cloudflare';
@@ -10,27 +10,17 @@ export interface AgentLLMGateway { generate(request: AgentLLMRequest): Promise<A
 export class MultiProviderAgentLLM implements AgentLLMGateway {
   constructor(private readonly gateway: AgentLLMGateway) {}
   async generate(request: AgentLLMRequest): Promise<AgentLLMResponse> {
-    const candidates = [request.policy.primary, ...(request.policy.fallback ?? [])];
-    let lastError: unknown;
-    for (let index = 0; index < candidates.length; index += 1) {
-      const candidate = candidates[index];
-      try {
-        const response = await this.gateway.generate({ ...request, policy: { ...request.policy, primary: candidate, fallback: [] } });
-        return { ...response, provider: candidate.provider, model: candidate.model, fallback: index > 0 || response.fallback };
-      } catch (error) { lastError = error; }
-    }
+    const candidates = [request.policy.primary, ...(request.policy.fallback ?? [])]; let lastError: unknown;
+    for (let index = 0; index < candidates.length; index += 1) { const candidate = candidates[index]; try { const response = await this.gateway.generate({ ...request, policy: { ...request.policy, primary: candidate, fallback: [] } }); return { ...response, provider: candidate.provider, model: candidate.model, fallback: index > 0 || response.fallback }; } catch (error) { lastError = error; } }
     throw lastError instanceof Error ? lastError : new Error('All configured agent LLM providers failed');
   }
 }
 
 export class LLMGatewayAgentAdapter implements AgentLLMGateway {
-  constructor(private readonly gateway: { generate(task: TaskType, prompt: string, options?: Record<string, unknown>): Promise<{ text: string; provider: LLMProvider; model: string; toolCalls?: ToolCall[] }> }) {}
+  constructor(private readonly gateway: { generate(task: TaskType, prompt: string, options?: GenerateOptions & { provider?: LLMProvider; requestId?: string }): Promise<{ text: string; provider: LLMProvider; model: string; toolCalls?: ToolCall[] }> }) {}
   async generate(request: AgentLLMRequest): Promise<AgentLLMResponse> {
     const input = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
-    const result = await this.gateway.generate(request.task, `SYSTEM: ${request.systemPrompt}\nUSER: ${input}`, {
-      provider: request.policy.primary.provider, model: request.policy.primary.model, capabilities: request.capabilities, tools: request.tools,
-      maxTokens: request.maxOutputTokens ?? request.policy.maxOutputTokens, requestId: request.requestId,
-    });
+    const result = await this.gateway.generate(request.task, `SYSTEM: ${request.systemPrompt}\nUSER: ${input}`, { provider: request.policy.primary.provider, model: request.policy.primary.model, task: request.task, capabilities: request.capabilities, tools: request.tools, maxTokens: request.maxOutputTokens ?? request.policy.maxOutputTokens, requestId: request.requestId });
     return { output: result.text, provider: result.provider, model: result.model, toolCalls: result.toolCalls };
   }
 }
