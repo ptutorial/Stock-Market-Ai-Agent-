@@ -6,20 +6,28 @@ import { constantTimeEqual } from './security.js';
 
 export interface GatewayHttpRequest { method: string; path: string; body?: unknown; headers?: Record<string, string | undefined>; }
 export interface GatewayHttpResponse { status: number; headers: Record<string, string>; body: unknown; }
-export interface GatewayHttpServerOptions extends GatewayClientOptions { maxBodyBytes?: number; apiKey?: string; }
+export interface GatewayHttpServerOptions extends GatewayClientOptions { maxBodyBytes?: number; apiKey?: string; corsOrigin?: string; }
 
 const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
 export function createGatewayHttpHandler(options: GatewayHttpServerOptions) {
   const client = new GatewayClient(options);
   const maxBodyBytes = options.maxBodyBytes ?? 1_048_576;
+  const corsOrigin = options.corsOrigin ?? '*';
+  const corsHeaders = {
+    'access-control-allow-origin': corsOrigin,
+    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-headers': 'Authorization,Content-Type,X-Request-ID',
+  };
+
   return async (request: GatewayHttpRequest): Promise<GatewayHttpResponse> => {
     const suppliedRequestId = request.headers?.['x-request-id'];
     const requestId = suppliedRequestId && REQUEST_ID.test(suppliedRequestId) ? suppliedRequestId : randomUUID();
-    const headers = { 'content-type': 'application/json', 'x-request-id': requestId };
+    const headers = { 'content-type': 'application/json', 'x-request-id': requestId, ...corsHeaders };
     const method = request.method.toUpperCase();
     const path = request.path.split('?', 1)[0];
 
+    if (method === 'OPTIONS') return { status: 204, headers, body: null };
     if (method === 'GET' && path === '/health') return { status: 200, headers, body: { status: 'ok', requestId } };
     if (method === 'GET' && path === '/ready') {
       const accounts = options.accounts.filter((account) => account.enabled !== false && options.adapters.some((adapter) => adapter.name === account.provider));
