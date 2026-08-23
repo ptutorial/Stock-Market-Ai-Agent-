@@ -1,1 +1,1 @@
-export * from '../../local-db-repository.js';
+export * from './sql-repository.js';
