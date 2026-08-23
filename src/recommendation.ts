@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentContext, AgentResult, AgentRegistry } from './agents.js';
 import type { AgentRuntime } from './agent-runtime.js';
 import { validateRecommendation, type RecommendationAction } from './recommendation-schema.js';
-import { calculateDeterministicScores } from './recommendation-scoring.js';
+import { calculateDeterministicScores, type DeterministicScores } from './recommendation-scoring.js';
 
 export interface SourceProvenance { agentId: string; role: string; tool: string; source: string; freshness?: string; observedAt?: number; fetchedAt?: number; fallback?: boolean; }
 export interface Recommendation { symbol: string; exchange?: string; horizon: string; recommendation: RecommendationAction; confidence: number; scores: Record<string, number>; evidence: string[]; risks: string[]; invalidationConditions: string[]; sourceProvenance: SourceProvenance[]; agentConclusions: Record<string, string>; draft: string; critique: string; requestId: string; }
@@ -102,8 +102,8 @@ function extractMetadata(value: unknown): Omit<SourceProvenance, 'agentId' | 'ro
   return { source: m.source, freshness: typeof m.freshness === 'string' ? m.freshness : undefined, observedAt: typeof m.observedAt === 'number' ? m.observedAt : undefined, fetchedAt: typeof m.fetchedAt === 'number' ? m.fetchedAt : undefined, fallback: typeof m.fallback === 'boolean' ? m.fallback : undefined };
 }
 
-function normalizeRecommendation(structured: Record<string, unknown> | undefined, context: { symbol: string; exchange: string; horizon: string; requestId: string; conclusions: Record<string, string>; draft: string; critique: string; provenance: SourceProvenance[]; deterministicScores: Record<string, number> }): Recommendation {
+function normalizeRecommendation(structured: Record<string, unknown> | undefined, context: { symbol: string; exchange: string; horizon: string; requestId: string; conclusions: Record<string, string>; draft: string; critique: string; provenance: SourceProvenance[]; deterministicScores: DeterministicScores }): Recommendation {
   const validated = validateRecommendation(structured);
   const suppliedScores = Object.keys(context.deterministicScores).length ? context.deterministicScores : validated.scores;
-  return { symbol: context.symbol, exchange: context.exchange, horizon: context.horizon, ...validated, scores: suppliedScores, sourceProvenance: context.provenance, agentConclusions: context.conclusions, draft: context.draft, critique: context.critique, requestId: context.requestId };
+  return { symbol: context.symbol, exchange: context.exchange, horizon: context.horizon, ...validated, scores: { ...suppliedScores }, sourceProvenance: context.provenance, agentConclusions: context.conclusions, draft: context.draft, critique: context.critique, requestId: context.requestId };
 }
