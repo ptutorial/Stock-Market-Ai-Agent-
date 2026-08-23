@@ -12,8 +12,9 @@ export class RecommendationEngine {
   async recommend(input: { symbol: string; exchange?: string; horizon?: string; data?: Record<string, unknown> }): Promise<Recommendation> {
     const requestId = randomUUID(); const exchange = input.exchange ?? 'NSE'; const horizon = input.horizon ?? '1-3_months';
     const context: AgentContext = { requestId, symbol: input.symbol, exchange, horizon, input: input.data ?? {}, evidence: {} };
-    const specialistResults: AgentResult[] = [];
-    for (const id of ['technical', 'fundamental', 'news', 'sector', 'risk']) { const agent = this.options.agents.get(id); if (!agent) throw new Error(`Required agent ${id} is not registered`); specialistResults.push(await this.options.runtime.run(agent, context)); }
+    const specialistIds = ['technical', 'fundamental', 'news', 'sector', 'risk'];
+    const agents = specialistIds.map((id) => { const agent = this.options.agents.get(id); if (!agent) throw new Error(`Required agent ${id} is not registered`); return agent; });
+    const specialistResults = await Promise.all(agents.map((agent) => this.options.runtime.run(agent, context)));
     const conclusions = Object.fromEntries(specialistResults.map((result) => [result.role, result.output]));
     const provenance = collectSourceProvenance(specialistResults);
     const synthesisContext: AgentContext = { ...context, evidence: { specialistConclusions: conclusions, sourceProvenance: provenance } };
@@ -37,8 +38,7 @@ function collectSourceProvenance(results: AgentResult[]): SourceProvenance[] {
 
 function extractMetadata(value: unknown): Omit<SourceProvenance, 'agentId' | 'role' | 'tool'> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const raw = (value as Record<string, unknown>).metadata;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const raw = (value as Record<string, unknown>).metadata; if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const m = raw as Record<string, unknown>; if (typeof m.source !== 'string') return undefined;
   return { source: m.source, freshness: typeof m.freshness === 'string' ? m.freshness : undefined, observedAt: typeof m.observedAt === 'string' ? m.observedAt : undefined, fetchedAt: typeof m.fetchedAt === 'string' ? m.fetchedAt : undefined, fallback: typeof m.fallback === 'boolean' ? m.fallback : undefined };
 }
