@@ -427,45 +427,6 @@ npm run load:failure
 - Use explicit agent tool permissions.
 - Keep provider credentials separate from the gateway API key.
 
-## 📋 Production readiness
-
-### Gateway
-
-- [x] Provider abstraction
-- [x] Dynamic multiple-account routing
-- [x] Capability-aware selection
-- [x] Retry/fallback handling
-- [x] Health/quarantine state
-- [x] Usage/cost normalization
-- [x] HTTP API
-- [x] SDK
-- [x] Redis atomic quota implementation
-- [x] Swagger/OpenAPI
-
-### Recommendation system
-
-- [x] Canonical market-data snapshot
-- [x] Source/freshness provenance
-- [x] Five specialist agents
-- [x] Parallel specialist execution
-- [x] Evidence-only specialist execution
-- [x] Deterministic scoring layer
-- [x] Recommendation synthesis
-- [x] Critic/final validation
-- [ ] Production-calibrated quantitative scoring
-- [ ] ML/XGBoost prediction integration
-- [ ] Historical out-of-sample validation
-
-### Data integration
-
-- [x] Local DB repository abstraction
-- [x] SQL market-data adapter
-- [x] Data-source routing
-- [x] Freshness-aware fallback
-- [ ] Validate against production database schema
-- [ ] Live Yahoo contract validation
-- [ ] End-to-end DB integration tests
-
 ## 📄 License
 
 This project is licensed under the **MIT License**. See [`LICENSE`](LICENSE).
