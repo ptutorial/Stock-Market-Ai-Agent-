@@ -4,7 +4,7 @@ import type { AgentRuntime } from './agent-runtime.js';
 import { validateRecommendation, type RecommendationAction } from './recommendation-schema.js';
 import { calculateDeterministicScores } from './recommendation-scoring.js';
 
-export interface SourceProvenance { agentId: string; role: string; tool: string; source: string; freshness?: string; observedAt?: string; fetchedAt?: string; fallback?: boolean; }
+export interface SourceProvenance { agentId: string; role: string; tool: string; source: string; freshness?: string; observedAt?: number; fetchedAt?: number; fallback?: boolean; }
 export interface Recommendation { symbol: string; exchange?: string; horizon: string; recommendation: RecommendationAction; confidence: number; scores: Record<string, number>; evidence: string[]; risks: string[]; invalidationConditions: string[]; sourceProvenance: SourceProvenance[]; agentConclusions: Record<string, string>; draft: string; critique: string; requestId: string; }
 export interface RecommendationEngineOptions { agents: AgentRegistry; runtime: AgentRuntime; }
 
@@ -58,7 +58,7 @@ function extractMetadata(value: unknown): Omit<SourceProvenance, 'agentId' | 'ro
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = (value as Record<string, unknown>).metadata; if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const m = raw as Record<string, unknown>; if (typeof m.source !== 'string') return undefined;
-  return { source: m.source, freshness: typeof m.freshness === 'string' ? m.freshness : undefined, observedAt: typeof m.observedAt === 'string' ? m.observedAt : undefined, fetchedAt: typeof m.fetchedAt === 'string' ? m.fetchedAt : undefined, fallback: typeof m.fallback === 'boolean' ? m.fallback : undefined };
+  return { source: m.source, freshness: typeof m.freshness === 'string' ? m.freshness : undefined, observedAt: typeof m.observedAt === 'number' ? m.observedAt : undefined, fetchedAt: typeof m.fetchedAt === 'number' ? m.fetchedAt : undefined, fallback: typeof m.fallback === 'boolean' ? m.fallback : undefined };
 }
 
 function normalizeRecommendation(structured: Record<string, unknown> | undefined, context: { symbol: string; exchange: string; horizon: string; requestId: string; conclusions: Record<string, string>; draft: string; critique: string; provenance: SourceProvenance[]; deterministicScores: Record<string, number> }): Recommendation {
