@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "npm run build && node dist/server.js",
+    "start": "npm run build && node scripts/start.mjs",
+    "start:api": "npm run build && node dist/server.js",
+    "start:swagger": "node scripts/swagger-server.mjs",
     "swagger": "node scripts/swagger-server.mjs",
     "test": "npm run build && node --test test/**/*.test.mjs",
     "test:recommendation": "npm run build && node --test test/integration/recommendation/recommendation.test.mjs",
