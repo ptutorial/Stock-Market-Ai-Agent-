@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentContext, AgentResult } from '../agents/registry.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { AgentRuntime } from '../agents/runtime.js';
-import { validateRecommendation, type RecommendationAction } from '../../../recommendation-schema.js';
+import { validateRecommendation, type RecommendationAction } from './schema.js';
 import { calculateDeterministicScores, type DeterministicScores } from './scoring.js';
 
 export interface SourceProvenance { agentId: string; role: string; tool: string; source: string; freshness?: string; observedAt?: number; fetchedAt?: number; fallback?: boolean; }
