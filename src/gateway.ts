@@ -5,6 +5,7 @@ import { InMemoryStateStore } from './state.js';
 import type { StateStore } from './state.js';
 import { ModelRegistry } from './model-registry.js';
 import { ModelRouter } from './router.js';
+import { validateGatewayConfig } from './config-validation.js';
 
 export interface CredentialStore { get(credentialRef: string): Promise<string>; }
 export interface UsageSink { record(event: Record<string, unknown>): Promise<void> | void; }
@@ -22,7 +23,17 @@ export class LLMGateway {
   private readonly usage: UsageSink;
   private readonly router: ModelRouter;
   private readonly config: Required<Pick<GatewayConfig, 'maxRetries' | 'cooldownMs'>>;
-  constructor(private readonly cfg: GatewayConfig, credentialStore: CredentialStore = new EnvironmentCredentialStore(), usage: UsageSink = new InMemoryUsageSink()) { this.credentialStore = credentialStore; this.usage = usage; this.stateStore = cfg.stateStore ?? new InMemoryStateStore(); this.modelRegistry = cfg.modelRegistry ?? new ModelRegistry(); this.router = new ModelRouter({ strategy: cfg.strategy ?? 'priority' }); this.config = { maxRetries: cfg.maxRetries ?? 2, cooldownMs: cfg.cooldownMs ?? 30_000 }; for (const adapter of cfg.adapters) this.adapters.set(adapter.name, adapter); for (const account of cfg.accounts) void this.stateStore.set(account.id, { requests: 0, tokens: 0, failures: 0, health: account.enabled === false ? 'disabled' : 'healthy' }); }
+  constructor(private readonly cfg: GatewayConfig, credentialStore: CredentialStore = new EnvironmentCredentialStore(), usage: UsageSink = new InMemoryUsageSink()) {
+    validateGatewayConfig(cfg);
+    this.credentialStore = credentialStore;
+    this.usage = usage;
+    this.stateStore = cfg.stateStore ?? new InMemoryStateStore();
+    this.modelRegistry = cfg.modelRegistry ?? new ModelRegistry();
+    this.router = new ModelRouter({ strategy: cfg.strategy ?? 'priority' });
+    this.config = { maxRetries: cfg.maxRetries ?? 2, cooldownMs: cfg.cooldownMs ?? 30_000 };
+    for (const adapter of cfg.adapters) this.adapters.set(adapter.name, adapter);
+    for (const account of cfg.accounts) void this.stateStore.set(account.id, { requests: 0, tokens: 0, failures: 0, health: account.enabled === false ? 'disabled' : 'healthy' });
+  }
 
   async generate(task: TaskType, prompt: string, options: GenerateRequest['options'] = {}): Promise<GenerateResult> {
     const routingOptions = options as AgentRoutingOptions;
