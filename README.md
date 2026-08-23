@@ -147,7 +147,13 @@ Deterministic scoring produces reproducible technical, fundamental, news, sector
 
 The current scoring formulas are an initial deterministic layer and require calibration, backtesting, and out-of-sample validation before use with real capital.
 
-## 🌐 HTTP API
+## 🌐 HTTP API and Swagger
+
+The gateway API runs on the configured `PORT`. For the current local setup, use `PORT=3001` in `.env`:
+
+```env
+PORT=3001
+```
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -155,12 +161,45 @@ The current scoring formulas are an initial deterministic layer and require cali
 | `GET` | `/ready` | Readiness |
 | `POST` | `/v1/generate` | Generate an LLM response |
 
-OpenAPI documentation:
+### Swagger UI on port 3005
+
+Start the gateway first:
+
+```bash
+npm start
+```
+
+Then, in a second terminal, start Swagger UI:
+
+```bash
+npm run swagger
+```
+
+Open:
 
 ```text
-docs/openapi.yaml
-docs/swagger-ui.html
+http://localhost:3005/
 ```
+
+Swagger serves the OpenAPI specification from:
+
+```text
+http://localhost:3005/openapi.yaml
+```
+
+The Swagger UI is configured to send API requests to the local gateway on `http://localhost:3001` by default. If the gateway is running on another port, pass it in the Swagger URL:
+
+```text
+http://localhost:3005/?api=http://localhost:3002
+```
+
+For example, to authenticate `/v1/generate`, click **Authorize** in Swagger UI and enter:
+
+```text
+Bearer YOUR_GATEWAY_API_KEY
+```
+
+Do not expose the gateway API key in source control.
 
 ## ▶️ Local setup
 
@@ -189,6 +228,18 @@ Edit `.env`, then build and test:
 ```bash
 npm run build
 npm test
+```
+
+Start the API:
+
+```bash
+npm start
+```
+
+Start Swagger UI in another terminal:
+
+```bash
+npm run swagger
 ```
 
 Recommendation tests:
@@ -276,6 +327,8 @@ Do not bake credentials into Docker images.
 │   ├── unit/
 │   └── integration/
 ├── scripts/
+│   ├── swagger-server.mjs
+│   └── ...
 ├── docs/
 │   ├── openapi.yaml
 │   ├── swagger-ui.html
