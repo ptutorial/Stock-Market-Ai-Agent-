@@ -23,4 +23,29 @@ export function createStockTools(provider: StockDataProvider): ToolHandler[] {
 }
 
 export function createStockSnapshotTool(router: DataSourceRouter): ToolHandler {
-  return { definition: tool('stock_snapshot', 'Build a source-aware evidence snapshot for a stock, including quote, history, technicals, fundamentals, news, sector and risk data.', schema({ symbol: { type: 'string', minLength: 1 }, exchange: { type: 'string', default: 'NSE' }, timeframe: { type: 'string', default: '1d' }, historyLimit: { type: 'integer', minimum: 1, maximum: 5000, default: 100 }, newsLimit: { type: 'integer', minimum: 1, maximum: 100, default: 10 }})), async execute(input) { return getStockSnapshot(router, requiredString(input, 'symbol'), optionalString(input, 'exchange') ?? 'NSE', { timeframe: optionalString(input, 'timeframe') ?? '1d', historyLimit: optionalPositiveInteger(input, 'historyLimit') ?? 100, newsLimit: optionalPositiveInteger(input, 'newsLimit') ?? 10 }); } };
+  return {
+    definition: tool(
+      'stock_snapshot',
+      'Build a source-aware evidence snapshot for a stock, including quote, history, technicals, fundamentals, news, sector and risk data.',
+      schema({
+        symbol: { type: 'string', minLength: 1 },
+        exchange: { type: 'string', default: 'NSE' },
+        timeframe: { type: 'string', default: '1d' },
+        historyLimit: { type: 'integer', minimum: 1, maximum: 5000, default: 100 },
+        newsLimit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+      }),
+    ),
+    async execute(input) {
+      return getStockSnapshot(
+        router,
+        requiredString(input, 'symbol'),
+        optionalString(input, 'exchange') ?? 'NSE',
+        {
+          timeframe: optionalString(input, 'timeframe') ?? '1d',
+          historyLimit: optionalPositiveInteger(input, 'historyLimit') ?? 100,
+          newsLimit: optionalPositiveInteger(input, 'newsLimit') ?? 10,
+        },
+      );
+    },
+  };
+}
