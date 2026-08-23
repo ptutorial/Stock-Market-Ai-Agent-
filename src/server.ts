@@ -1,7 +1,8 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { loadEnvFile } from 'node:process';
-import { resolve } from 'node:path';
+import { resolve, join, normalize, extname } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { createClient } from 'redis';
 import { createGatewayHttpHandler, type GatewayHttpServerOptions } from './http.js';
 import { flattenAccounts, loadConfigFromEnvironment } from './config.js';
@@ -24,6 +25,31 @@ function loadEnvironment(): void {
   }
 }
 
+function swaggerHtml(apiUrl: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Multi-Provider LLM Gateway API</title><link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"></head><body><div id="swagger-ui"></div><script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script><script>window.onload=()=>{window.ui=SwaggerUIBundle({url:'/openapi.yaml',dom_id:'#swagger-ui',deepLinking:true,persistAuthorization:true,requestInterceptor:(request)=>{if(request.url.startsWith('http://')||request.url.startsWith('https://')) request.url=new URL(request.url); return request;}});};</script></body></html>`;
+}
+
+async function swaggerResponse(path: string, apiUrl: string): Promise<{ status: number; type: string; body: string } | undefined> {
+  if (path === '/') return { status: 200, type: 'text/html; charset=utf-8', body: swaggerHtml(apiUrl) };
+  if (path === '/openapi.yaml') {
+    const source = await readFile(resolve(process.cwd(), 'docs/openapi.yaml'), 'utf8');
+    const generated = source.replace(/servers:\s*\n(?:\s+- url:.*\n)?(?:\s+description:.*\n)?/, `servers:\n  - url: ${apiUrl}\n    description: Local server\n`);
+    return { status: 200, type: 'text/yaml; charset=utf-8', body: generated };
+  }
+  const relative = path.replace(/^\/+/, '');
+  if (!relative || relative.includes('..')) return undefined;
+  try {
+    const filePath = normalize(join(resolve(process.cwd(), 'docs'), relative));
+    const docsRoot = resolve(process.cwd(), 'docs');
+    if (!filePath.startsWith(`${docsRoot}/`)) return undefined;
+    const body = await readFile(filePath, 'utf8');
+    const type = extname(filePath) === '.yaml' || extname(filePath) === '.yml' ? 'text/yaml; charset=utf-8' : extname(filePath) === '.html' ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8';
+    return { status: 200, type, body };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function startServer(): Promise<void> {
   loadEnvironment();
   const port = Number(process.env.PORT ?? 3000);
@@ -36,9 +62,7 @@ export async function startServer(): Promise<void> {
   const accounts = flattenAccounts(config);
   const configuredProviders = new Set(accounts.map((account) => account.provider));
   const availableProviders = new Set(adapters.map((adapter) => adapter.name));
-  for (const provider of configuredProviders) {
-    if (!availableProviders.has(provider)) throw new Error(`No adapter is registered for configured provider: ${provider}`);
-  }
+  for (const provider of configuredProviders) if (!availableProviders.has(provider)) throw new Error(`No adapter is registered for configured provider: ${provider}`);
   if (!accounts.length) throw new Error('No enabled gateway accounts are configured');
 
   let redisClient: ReturnType<typeof createClient> | undefined;
@@ -85,84 +109,56 @@ export async function startServer(): Promise<void> {
   };
 
   const server = createServer(async (req, res) => {
+    const path = (req.url ?? '/').split('?', 1)[0];
+    const apiUrl = `http://localhost:${port}`;
+    if (req.method === 'GET' && (path === '/' || path === '/openapi.yaml' || path.startsWith('/swagger/'))) {
+      const swagger = await swaggerResponse(path, apiUrl);
+      if (swagger) {
+        res.writeHead(swagger.status, { 'content-type': swagger.type, 'cache-control': 'no-cache' });
+        res.end(swagger.body);
+        return;
+      }
+    }
+
     try {
+      res.setHeader('access-control-allow-origin', '*');
+      res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
+      res.setHeader('access-control-allow-headers', 'Authorization, Content-Type, X-Request-ID');
+      if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
       const chunks: Buffer[] = [];
       let size = 0;
       for await (const chunk of req) {
-        const buffer = Buffer.from(chunk);
-        size += buffer.length;
-        if (size > maxBodyBytes) {
-          res.statusCode = 413;
-          res.setHeader('content-type', 'application/json');
-          res.end(JSON.stringify({ error: 'PayloadTooLarge' }));
-          req.destroy();
-          return;
-        }
+        const buffer = Buffer.from(chunk); size += buffer.length;
+        if (size > maxBodyBytes) { res.statusCode = 413; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'PayloadTooLarge' })); req.destroy(); return; }
         chunks.push(buffer);
       }
       const raw = Buffer.concat(chunks).toString('utf8');
       let body: unknown = {};
-      try { body = raw ? JSON.parse(raw) : {}; } catch {
-        res.statusCode = 400;
-        res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify({ error: 'InvalidRequest' }));
-        return;
-      }
+      try { body = raw ? JSON.parse(raw) : {}; } catch { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'InvalidRequest' })); return; }
       const result = await handler({ method: req.method ?? 'GET', path: req.url ?? '/', body, headers: { authorization: req.headers.authorization, 'x-request-id': req.headers['x-request-id'] as string | undefined } });
       res.statusCode = result.status;
       for (const [key, value] of Object.entries(result.headers)) res.setHeader(key, value);
       res.end(JSON.stringify(result.body));
     } catch (error: unknown) {
-      console.error('HTTP request error', error);
-      res.statusCode = 500;
-      res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ error: 'InternalServerError' }));
+      console.error('HTTP request error', error); res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'InternalServerError' }));
     }
   });
 
   const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number, onTimeout: () => void): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        operation,
-        new Promise<T>((_, reject) => {
-          timer = setTimeout(() => { onTimeout(); reject(new Error('Shutdown timeout')); }, timeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    try { return await Promise.race([operation, new Promise<T>((_, reject) => { timer = setTimeout(() => { onTimeout(); reject(new Error('Shutdown timeout')); }, timeoutMs); })]); }
+    finally { if (timer) clearTimeout(timer); }
   };
-
   const shutdown = async (signal: string) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    if (healthTimer) clearInterval(healthTimer);
-    console.log(`Received ${signal}; shutting down`);
-    try {
-      await withTimeout(new Promise<void>((resolve) => server.close(() => resolve())), shutdownTimeoutMs, () => {
-        server.closeAllConnections();
-      });
-    } catch (error: unknown) {
-      console.error('HTTP server shutdown timed out', error);
-    }
-    if (redisClient?.isOpen) {
-      try {
-        await withTimeout(redisClient.quit(), shutdownTimeoutMs, () => {
-          redisClient?.disconnect();
-        });
-      } catch (error: unknown) {
-        console.error('Redis shutdown timed out', error);
-        redisClient.disconnect();
-      }
-    }
+    if (shuttingDown) return; shuttingDown = true; if (healthTimer) clearInterval(healthTimer); console.log(`Received ${signal}; shutting down`);
+    try { await withTimeout(new Promise<void>((resolveClose) => server.close(() => resolveClose())), shutdownTimeoutMs, () => server.closeAllConnections()); } catch (error: unknown) { console.error('HTTP server shutdown timed out', error); }
+    if (redisClient?.isOpen) { try { await withTimeout(redisClient.quit(), shutdownTimeoutMs, () => redisClient?.disconnect()); } catch (error: unknown) { console.error('Redis shutdown timed out', error); redisClient.disconnect(); } }
   };
   process.once('SIGTERM', () => void shutdown('SIGTERM').then(() => process.exit(0)));
   process.once('SIGINT', () => void shutdown('SIGINT').then(() => process.exit(0)));
-
   await checkHealth();
   healthTimer = setInterval(() => void checkHealth().catch((error: unknown) => console.error('Health check cycle failed', error)), healthIntervalMs);
-  server.listen(port, '0.0.0.0', () => console.log(`LLM gateway listening on ${port}`));
+  server.listen(port, '0.0.0.0', () => console.log(`LLM gateway + Swagger listening on http://localhost:${port}`));
 }
 
 const entrypoint = process.argv[1] ? fileURLToPath(import.meta.url) === process.argv[1] : false;
