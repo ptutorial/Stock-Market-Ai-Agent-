@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentContext, AgentResult, AgentRegistry } from './agents.js';
 import type { AgentRuntime } from './agent-runtime.js';
 import { validateRecommendation, type RecommendationAction } from './recommendation-schema.js';
+import { calculateDeterministicScores } from './recommendation-scoring.js';
 
 export interface SourceProvenance { agentId: string; role: string; tool: string; source: string; freshness?: string; observedAt?: string; fetchedAt?: string; fallback?: boolean; }
 export interface Recommendation { symbol: string; exchange?: string; horizon: string; recommendation: RecommendationAction; confidence: number; scores: Record<string, number>; evidence: string[]; risks: string[]; invalidationConditions: string[]; sourceProvenance: SourceProvenance[]; agentConclusions: Record<string, string>; draft: string; critique: string; requestId: string; }
@@ -17,14 +18,31 @@ export class RecommendationEngine {
     const specialistResults = await Promise.all(agents.map((agent) => this.options.runtime.run(agent, context)));
     const conclusions = Object.fromEntries(specialistResults.map((result) => [result.role, result.output]));
     const provenance = collectSourceProvenance(specialistResults);
-    const synthesisContext: AgentContext = { ...context, evidence: { specialistConclusions: conclusions, sourceProvenance: provenance } };
+    const deterministicScores = calculateDeterministicScores(collectScoringEvidence(specialistResults));
+    const synthesisContext: AgentContext = { ...context, evidence: { specialistConclusions: conclusions, sourceProvenance: provenance, deterministicScores } };
     const recommendationAgent = this.options.agents.get('recommendation'); const criticAgent = this.options.agents.get('critic'); const finalAgent = this.options.agents.get('final-decision');
     if (!recommendationAgent || !criticAgent || !finalAgent) throw new Error('Recommendation, critic and final-decision agents are required');
     const draftResult = await this.options.runtime.run(recommendationAgent, synthesisContext);
     const critiqueResult = await this.options.runtime.run(criticAgent, { ...synthesisContext, evidence: { ...synthesisContext.evidence, draft: draftResult.output } });
     const finalResult = await this.options.runtime.run(finalAgent, { ...synthesisContext, evidence: { ...synthesisContext.evidence, draft: draftResult.output, critique: critiqueResult.output } });
-    return normalizeRecommendation(finalResult.structured, { symbol: input.symbol, exchange, horizon, requestId, conclusions, draft: draftResult.output, critique: critiqueResult.output, provenance });
+    return normalizeRecommendation(finalResult.structured, { symbol: input.symbol, exchange, horizon, requestId, conclusions, draft: draftResult.output, critique: critiqueResult.output, provenance, deterministicScores });
   }
+}
+
+function collectScoringEvidence(results: AgentResult[]): Record<string, unknown> {
+  const evidence: Record<string, unknown> = {};
+  const mapping: Record<string, string> = { technical: 'technical', fundamental: 'fundamental', news: 'news', sector: 'sector', risk: 'risk' };
+  for (const result of results) {
+    const key = mapping[result.role];
+    if (!key) continue;
+    const values = result.toolResults.map((item) => {
+      const output = item.output;
+      if (output && typeof output === 'object' && !Array.isArray(output) && 'data' in output) return (output as Record<string, unknown>).data;
+      return output;
+    });
+    evidence[key] = key === 'news' ? values.flat() : values[values.length - 1];
+  }
+  return evidence;
 }
 
 function collectSourceProvenance(results: AgentResult[]): SourceProvenance[] {
@@ -43,7 +61,8 @@ function extractMetadata(value: unknown): Omit<SourceProvenance, 'agentId' | 'ro
   return { source: m.source, freshness: typeof m.freshness === 'string' ? m.freshness : undefined, observedAt: typeof m.observedAt === 'string' ? m.observedAt : undefined, fetchedAt: typeof m.fetchedAt === 'string' ? m.fetchedAt : undefined, fallback: typeof m.fallback === 'boolean' ? m.fallback : undefined };
 }
 
-function normalizeRecommendation(structured: Record<string, unknown> | undefined, context: { symbol: string; exchange: string; horizon: string; requestId: string; conclusions: Record<string, string>; draft: string; critique: string; provenance: SourceProvenance[] }): Recommendation {
+function normalizeRecommendation(structured: Record<string, unknown> | undefined, context: { symbol: string; exchange: string; horizon: string; requestId: string; conclusions: Record<string, string>; draft: string; critique: string; provenance: SourceProvenance[]; deterministicScores: Record<string, number> }): Recommendation {
   const validated = validateRecommendation(structured);
-  return { symbol: context.symbol, exchange: context.exchange, horizon: context.horizon, ...validated, sourceProvenance: context.provenance, agentConclusions: context.conclusions, draft: context.draft, critique: context.critique, requestId: context.requestId };
+  const suppliedScores = Object.keys(context.deterministicScores).length ? context.deterministicScores : validated.scores;
+  return { symbol: context.symbol, exchange: context.exchange, horizon: context.horizon, ...validated, scores: suppliedScores, sourceProvenance: context.provenance, agentConclusions: context.conclusions, draft: context.draft, critique: context.critique, requestId: context.requestId };
 }
