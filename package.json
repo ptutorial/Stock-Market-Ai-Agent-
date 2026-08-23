@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/*.test.mjs",
-    "test:recommendation": "npm run build && node --test test/recommendation.test.mjs",
+    "test": "npm run build && node --test test",
+    "test:recommendation": "npm run build && node --test test/integration/recommendation/recommendation.test.mjs",
     "load:test": "npm run build && node scripts/load-test.mjs",
     "load:redis": "npm run build && node scripts/load-redis-test.mjs",
     "load:multi": "npm run build && node scripts/load-multi-instance.mjs",
@@ -15,14 +15,7 @@
     "load:failure": "npm run build && node scripts/load-failure-recovery.mjs",
     "certification:batch-e": "node scripts/production-certification.mjs"
   },
-  "engines": {
-    "node": "23.8.0"
-  },
-  "dependencies": {
-    "redis": "^5.8.2"
-  },
-  "devDependencies": {
-    "@types/node": "^22.0.0",
-    "typescript": "^5.7.0"
-  }
+  "engines": { "node": "23.8.0" },
+  "dependencies": { "redis": "^5.8.2" },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.7.0" }
 }
