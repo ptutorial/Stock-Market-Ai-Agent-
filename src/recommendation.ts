@@ -6,27 +6,68 @@ import { calculateDeterministicScores } from './recommendation-scoring.js';
 
 export interface SourceProvenance { agentId: string; role: string; tool: string; source: string; freshness?: string; observedAt?: number; fetchedAt?: number; fallback?: boolean; }
 export interface Recommendation { symbol: string; exchange?: string; horizon: string; recommendation: RecommendationAction; confidence: number; scores: Record<string, number>; evidence: string[]; risks: string[]; invalidationConditions: string[]; sourceProvenance: SourceProvenance[]; agentConclusions: Record<string, string>; draft: string; critique: string; requestId: string; }
-export interface RecommendationEngineOptions { agents: AgentRegistry; runtime: AgentRuntime; }
+export interface RecommendationEngineOptions {
+  agents: AgentRegistry;
+  runtime: AgentRuntime;
+  snapshotLoader?: (symbol: string, exchange: string) => Promise<unknown>;
+}
 
 export class RecommendationEngine {
   constructor(private readonly options: RecommendationEngineOptions) {}
+
   async recommend(input: { symbol: string; exchange?: string; horizon?: string; data?: Record<string, unknown> }): Promise<Recommendation> {
-    const requestId = randomUUID(); const exchange = input.exchange ?? 'NSE'; const horizon = input.horizon ?? '1-3_months';
-    const context: AgentContext = { requestId, symbol: input.symbol, exchange, horizon, input: input.data ?? {}, evidence: {} };
+    const requestId = randomUUID();
+    const exchange = input.exchange ?? 'NSE';
+    const horizon = input.horizon ?? '1-3_months';
+    const suppliedSnapshot = input.data?.stockSnapshot;
+    const snapshot = suppliedSnapshot ?? (this.options.snapshotLoader ? await this.options.snapshotLoader(input.symbol, exchange) : undefined);
+    const evidence = snapshot === undefined ? {} : { stockSnapshot: snapshot };
+    const context: AgentContext = { requestId, symbol: input.symbol, exchange, horizon, input: input.data ?? {}, evidence, evidenceOnly: snapshot !== undefined };
     const specialistIds = ['technical', 'fundamental', 'news', 'sector', 'risk'];
     const agents = specialistIds.map((id) => { const agent = this.options.agents.get(id); if (!agent) throw new Error(`Required agent ${id} is not registered`); return agent; });
     const specialistResults = await Promise.all(agents.map((agent) => this.options.runtime.run(agent, context)));
     const conclusions = Object.fromEntries(specialistResults.map((result) => [result.role, result.output]));
-    const provenance = collectSourceProvenance(specialistResults);
-    const deterministicScores = calculateDeterministicScores(collectScoringEvidence(specialistResults));
-    const synthesisContext: AgentContext = { ...context, evidence: { specialistConclusions: conclusions, sourceProvenance: provenance, deterministicScores } };
+    const provenance = snapshot !== undefined ? collectSnapshotProvenance(snapshot) : collectSourceProvenance(specialistResults);
+    const deterministicScores = calculateDeterministicScores(snapshot !== undefined ? snapshotScoringEvidence(snapshot) : collectScoringEvidence(specialistResults));
+    const synthesisEvidence = { ...evidence, specialistConclusions: conclusions, sourceProvenance: provenance, deterministicScores };
+    const synthesisContext: AgentContext = { ...context, evidence: synthesisEvidence, evidenceOnly: true };
     const recommendationAgent = this.options.agents.get('recommendation'); const criticAgent = this.options.agents.get('critic'); const finalAgent = this.options.agents.get('final-decision');
     if (!recommendationAgent || !criticAgent || !finalAgent) throw new Error('Recommendation, critic and final-decision agents are required');
     const draftResult = await this.options.runtime.run(recommendationAgent, synthesisContext);
-    const critiqueResult = await this.options.runtime.run(criticAgent, { ...synthesisContext, evidence: { ...synthesisContext.evidence, draft: draftResult.output } });
-    const finalResult = await this.options.runtime.run(finalAgent, { ...synthesisContext, evidence: { ...synthesisContext.evidence, draft: draftResult.output, critique: critiqueResult.output } });
+    const critiqueResult = await this.options.runtime.run(criticAgent, { ...synthesisContext, evidence: { ...synthesisEvidence, draft: draftResult.output } });
+    const finalResult = await this.options.runtime.run(finalAgent, { ...synthesisContext, evidence: { ...synthesisEvidence, draft: draftResult.output, critique: critiqueResult.output } });
     return normalizeRecommendation(finalResult.structured, { symbol: input.symbol, exchange, horizon, requestId, conclusions, draft: draftResult.output, critique: critiqueResult.output, provenance, deterministicScores });
   }
+}
+
+function unwrapRouted(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  return 'data' in record ? record.data : value;
+}
+
+function snapshotScoringEvidence(snapshot: unknown): Record<string, unknown> {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return {};
+  const s = snapshot as Record<string, unknown>;
+  return {
+    technical: unwrapRouted(s.technicals),
+    fundamental: unwrapRouted(s.fundamentals),
+    news: unwrapRouted(s.news),
+    sector: unwrapRouted(s.sector),
+    risk: unwrapRouted(s.risk),
+  };
+}
+
+function collectSnapshotProvenance(snapshot: unknown): SourceProvenance[] {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return [];
+  const sources = (snapshot as Record<string, unknown>).sources;
+  if (!Array.isArray(sources)) return [];
+  return sources.flatMap((source, index) => {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return [];
+    const m = source as Record<string, unknown>;
+    if (typeof m.source !== 'string') return [];
+    return [{ agentId: 'stock-snapshot', role: 'data', tool: `stock_snapshot.${index}`, source: m.source, freshness: typeof m.freshness === 'string' ? m.freshness : undefined, observedAt: typeof m.observedAt === 'number' ? m.observedAt : undefined, fetchedAt: typeof m.fetchedAt === 'number' ? m.fetchedAt : undefined, fallback: typeof m.fallback === 'boolean' ? m.fallback : undefined }];
+  });
 }
 
 function collectScoringEvidence(results: AgentResult[]): Record<string, unknown> {
