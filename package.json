@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test",
+    "test": "npm run build && node --test test/**/*.test.mjs",
     "test:recommendation": "npm run build && node --test test/integration/recommendation/recommendation.test.mjs",
     "load:test": "npm run build && node scripts/load-test.mjs",
     "load:redis": "npm run build && node scripts/load-redis-test.mjs",
