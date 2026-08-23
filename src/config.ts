@@ -28,7 +28,7 @@ const DEFAULT_CAPABILITIES: Record<ProviderName, Capability[]> = {
 };
 
 const DEFAULT_MODELS: Record<ProviderName, string> = {
-  gemini: 'gemini-2.5-flash',
+  gemini: 'gemini-flash-latest',
   groq: 'llama-3.3-70b-versatile',
   openrouter: 'openai/gpt-4o-mini',
   cloudflare: '@cf/meta/llama-3.1-8b-instruct',
