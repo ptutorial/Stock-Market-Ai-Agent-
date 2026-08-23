@@ -1,312 +1,127 @@
 # 🚀 Stock Market AI Agent
 
-A production-oriented TypeScript platform for building **multi-agent stock-market recommendations** on top of a multi-provider LLM gateway.
+A TypeScript platform for multi-agent stock-market analysis and recommendations using market data, deterministic scoring, and a multi-provider LLM gateway.
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-2ea44f?style=for-the-badge" alt="MIT License" />
   <img src="https://img.shields.io/badge/TypeScript-5.x-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Node.js-23.x-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js" />
-  <img src="https://img.shields.io/badge/Redis-atomic%20quotas-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis" />
-  <img src="https://img.shields.io/badge/OpenAPI-3.0.3-6BA539?style=for-the-badge&logo=openapiinitiative&logoColor=white" alt="OpenAPI" />
+  <img src="https://img.shields.io/badge/MySQL-8.x-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="MySQL" />
+  <img src="https://img.shields.io/badge/Redis-6379-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis" />
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/Groq-supported-F55036?style=flat-square" alt="Groq" />
-  <img src="https://img.shields.io/badge/OpenRouter-supported-111827?style=flat-square" alt="OpenRouter" />
-  <img src="https://img.shields.io/badge/Cloudflare%20AI-supported-F38020?style=flat-square&logo=cloudflare&logoColor=white" alt="Cloudflare AI" />
-</p>
-
-> **Status:** Production-candidate architecture. Core gateway, multi-account routing, Redis atomic quotas, market-data routing, shared stock evidence, specialist agents, recommendation validation, Swagger/OpenAPI, and load tooling are implemented. Full production readiness still requires target-environment database integration, live-provider contract validation, deployment/security validation, and final certification.
-
-## 📌 What this project does
+## 📌 What it does
 
 The application combines structured market data, specialist agents, deterministic quantitative scoring, and an LLM decision layer to produce a validated recommendation.
 
 ```text
-                         Stock / Symbol Request
-                                  |
-                                  v
-                         +-------------------+
-                         | Canonical Snapshot |
-                         +---------+---------+
-                                   |
-       +---------------------------+---------------------------+
-       |             |             |             |             |
-       v             v             v             v             v
-   Technical     Fundamental      News         Sector         Risk
-     Agent          Agent         Agent         Agent         Agent
-       |             |             |             |             |
-       +-------------+-------------+-------------+-------------+
-                                   |
-                                   v
-                       Deterministic Quant Score
-                                   |
-                                   v
-                         Recommendation Agent
-                                   |
-                                   v
-                              Critic Agent
-                                   |
-                                   v
-                         Final Decision Validator
-                                   |
-                                   v
-                           Recommendation +
-                         Evidence + Provenance
-```
-
-The five specialist agents execute against the same canonical market snapshot so independent agents do not repeatedly fetch potentially different market states.
-
-## 🧠 Recommendation architecture
-
-The pipeline separates **data acquisition**, **analysis**, and **decisioning**:
-
-1. Resolve the requested stock/symbol.
-2. Build one canonical market-data snapshot.
-3. Preserve source and freshness metadata.
-4. Run technical, fundamental, news, sector, and risk specialists.
-5. Calculate deterministic quantitative scores outside the LLM.
-6. Synthesize the evidence through the recommendation agent.
-7. Run critic/final validation.
-8. Fail closed when the final structured contract is invalid.
-9. Return the recommendation with evidence/provenance suitable for audit.
-
-### Specialist agents
-
-| Agent | Responsibility |
-|---|---|
-| 📈 Technical | Trend, momentum, volatility, moving averages, RSI, volume, support/resistance |
-| 💰 Fundamental | Valuation, growth, profitability, leverage, cash flow |
-| 📰 News | Recent news and sentiment evidence |
-| 🏭 Sector | Sector classification and relative sector strength |
-| 🛡️ Risk | Beta and available risk metrics |
-
-Agent tool access is explicitly registered. An agent cannot invoke a tool outside its declared permission set.
-
-## 🗄️ Market data
-
-The application uses a provider-neutral market-data abstraction:
-
-```text
-MarketDataSource
-    |
-    +-- quote
-    +-- history
-    +-- technicals
-    +-- fundamentals
-    +-- news
-    +-- sectorStrength
-    +-- risk
-```
-
-`DataSourceRouter` supports ordered sources and freshness-aware fallback.
-
-```text
-                 DataSourceRouter
-                       |
-              +--------+--------+
-              |                 |
-              v                 v
-          Local DB            Yahoo
-          primary           fallback
-```
-
-The canonical snapshot retains source/freshness information such as `source`, `fetchedAt`, `observedAt`, `freshness`, and `fallback`.
-
-### Local database
-
-Most market data can be supplied through `SqlMarketDataRepository`.
-
-The current adapter provides repository operations for:
-
-- Quote
-- Historical OHLCV
-- Technical indicators
-- Fundamentals
-- News
-- Sector information
-- Risk metrics
-
-The repository is schema-specific. Validate its SQL against the actual database schema before production deployment.
-
-### Yahoo fallback
-
-Yahoo can be configured as a fallback when local data is unavailable or outside the configured freshness window. It should be treated primarily as a raw market-data fallback; derived analytics must be validated before being treated as authoritative.
-
-## 📊 Deterministic scoring & ML roadmap
-
-The deterministic scoring layer produces reproducible components for:
-
-```text
-technical
-fundamental
-news
-sector
-risk
-overall
-```
-
-The LLM interprets supplied evidence; deterministic calculations provide quantitative inputs.
-
-> The current formulas are an initial deterministic layer, not a fully validated trading model. Calibration, backtesting, and out-of-sample validation remain required.
-
-The architecture can also incorporate an ML/XGBoost model:
-
-```text
-Historical DB → Feature Engineering → ML/XGBoost
-                                      |
-                                      v
-                              Prediction + Probability
-                                      |
-                                      v
-                              Canonical Evidence
-                                      |
-                           Agents + Quant Score
-                                      |
-                                      v
-                              Recommendation
+Stock Request
+     ↓
+Canonical Market Snapshot
+     ↓
+Technical ─ Fundamental ─ News ─ Sector ─ Risk
+     ↓
+Deterministic Quantitative Score
+     ↓
+Recommendation Agent
+     ↓
+Critic / Final Validation
+     ↓
+Recommendation + Evidence + Provenance
 ```
 
 ## 🤖 Multi-provider LLM gateway
 
-The gateway provides a common abstraction for generation and streaming across providers.
+Supported providers:
 
-| Provider | Adapter |
-|---|---|
-| 🔵 Google Gemini | `GeminiAdapter` |
-| 🟠 Groq | `GroqAdapter` |
-| ⚫ OpenRouter | `OpenRouterAdapter` |
-| 🟧 Cloudflare Workers AI | `CloudflareWorkersAIAdapter` |
+- 🔵 Google Gemini
+- 🟠 Groq
+- ⚫ OpenRouter
+- 🟧 Cloudflare Workers AI
 
-Supported capabilities include:
+The gateway supports capability-aware routing, retries, cooldowns, health state, provider/account fallback, quotas, usage accounting, streaming, and normalized errors.
 
-- Capability-aware routing
-- Multiple accounts per provider
-- Priority/load-aware routing
-- Retry/backoff
-- Cooldowns
-- Health state
-- Provider/account fallback
-- RPM/RPD/TPM/TPD controls
-- Usage/cost accounting
-- Streaming
-- Normalized errors
-- Redis-backed distributed state
+### 🔑 Dynamic multi-account configuration
 
-## 🔑 Dynamic multi-account configuration
-
-You can configure **any number of accounts per provider**. There is no hard-coded five-account limit.
-
-Add numbered credentials to `.env`:
+There is **no hard-coded account limit**. Add as many numbered accounts as required:
 
 ```env
 GEMINI_API_KEY_1=your_gemini_key_1
 GEMINI_API_KEY_2=your_gemini_key_2
 GEMINI_API_KEY_3=your_gemini_key_3
+
 GROQ_API_KEY_1=your_groq_key_1
 GROQ_API_KEY_2=your_groq_key_2
+
 OPENROUTER_API_KEY_1=your_openrouter_key_1
+OPENROUTER_API_KEY_2=your_openrouter_key_2
+
 CLOUDFLARE_API_TOKEN_1=your_cloudflare_token_1
+CLOUDFLARE_API_TOKEN_2=your_cloudflare_token_2
+CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
 ```
 
-The gateway dynamically discovers the configured numbered credentials. You can add account `10` without creating accounts `4` through `9`; configured keys are discovered independently.
+Account numbering does not need to be contiguous. The gateway dynamically discovers the numbered credentials.
 
-Conceptually:
+Use only accounts and credentials you are legitimately authorized to use; do not use multiple accounts to circumvent provider terms or quotas.
 
-```text
-GEMINI_API_KEY_1  ─┐
-GEMINI_API_KEY_2  ─┤
-GEMINI_API_KEY_N  ─┤→ Dynamic Account Loader → Gemini accounts
-                   │
-GROQ_API_KEY_*    ─┤→ Dynamic Account Loader → Groq accounts
-OPENROUTER_*      ─┤→ Dynamic Account Loader → OpenRouter accounts
-CLOUDFLARE_*      ─┘→ Dynamic Account Loader → Cloudflare accounts
-```
+## 🗄️ Database configuration
 
-Each account can maintain its own model list, capabilities, priority, quotas, health state, cooldown state, usage, and credential reference.
+The application uses MySQL for local database configuration.
 
-Multiple accounts must represent legitimately authorized accounts and must not be used to circumvent provider terms, quotas, or access controls.
-
-## 🧮 Redis & distributed quotas
-
-Redis provides atomic shared state for horizontally scaled gateway instances.
-
-```text
-              Load Balancer
-                    |
-          +---------+---------+
-          |         |         |
-       Gateway   Gateway   Gateway
-          |         |         |
-          +---------+---------+
-                    |
-                  Redis
-```
-
-Quota reservation uses atomic Redis Lua execution so concurrent instances cannot independently approve reservations beyond configured limits.
-
-Supported dimensions:
-
-```text
-RPM  requests/minute
-RPD  requests/day
-TPM  tokens/minute
-TPD  tokens/day
-```
-
-Redis quota failures are designed to fail closed.
-
-## 🌐 HTTP API & Swagger
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/health` | Liveness |
-| `GET` | `/ready` | Readiness and healthy-account count |
-| `POST` | `/v1/generate` | Generate an LLM response |
-
-OpenAPI documentation:
-
-```text
-docs/openapi.yaml
-docs/swagger-ui.html
-```
-
-The OpenAPI document is version **3.0.3** and includes interactive Bearer authorization through the static Swagger UI.
-
-## 🔐 Environment & secrets
-
-All local credentials belong in the root `.env` file:
+Create your local environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-**Never commit `.env` or real credentials to GitHub.**
-
-### Database
+Then configure:
 
 ```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=stock_market
-DB_USER=stock_user
-DB_PASSWORD=change-me
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=laravel
+DB_USERNAME=laravel
+DB_PASSWORD=laravel
 ```
 
-Use the exact connection variables expected by the database adapter in `src/`.
+Make sure the MySQL database and user exist before starting the application.
 
-### Redis
+## 🔴 Redis configuration
+
+Redis is used for shared state and distributed quota/rate-limit coordination.
+
+The local configuration is:
 
 ```env
-REDIS_URL=redis://localhost:6379
+REDIS_CLIENT=phpredis
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=
+REDIS_PORT=6379
+REDIS_URL=redis://127.0.0.1:6379
 ```
 
-Authenticated Redis:
+For a password-protected Redis instance:
 
 ```env
-REDIS_URL=redis://:your_redis_password@localhost:6379
+REDIS_PASSWORD=your_redis_password
+REDIS_URL=redis://:your_redis_password@127.0.0.1:6379
 ```
+
+## 🔐 Environment and secrets
+
+`.env.example` is the configuration template. For local development:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your real database, Redis, gateway, and LLM credentials.
+
+**Never commit `.env` or real API credentials to GitHub.**
+
+For production, inject secrets through the deployment environment or a secret manager.
 
 ### Gateway API key
 
@@ -314,7 +129,7 @@ REDIS_URL=redis://:your_redis_password@localhost:6379
 GATEWAY_API_KEY=your_gateway_api_key
 ```
 
-### LLM keys
+### LLM credentials
 
 ```env
 GEMINI_API_KEY_1=...
@@ -324,22 +139,54 @@ OPENROUTER_API_KEY_1=...
 CLOUDFLARE_API_TOKEN_1=...
 ```
 
-For production, inject secrets through a deployment secret manager instead of storing them in a file.
+## 🧮 Market data and recommendation pipeline
 
-## ▶️ Running locally
+The market-data layer is provider-neutral and supports quote, history, technicals, fundamentals, news, sector, and risk data. A canonical stock snapshot preserves source and freshness information so specialist agents work from a consistent evidence set.
+
+Deterministic scoring produces reproducible technical, fundamental, news, sector, risk, and overall components. The LLM interprets supplied evidence rather than inventing market facts.
+
+The current scoring formulas are an initial deterministic layer and require calibration, backtesting, and out-of-sample validation before use with real capital.
+
+## 🌐 HTTP API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness |
+| `GET` | `/ready` | Readiness |
+| `POST` | `/v1/generate` | Generate an LLM response |
+
+OpenAPI documentation:
+
+```text
+docs/openapi.yaml
+docs/swagger-ui.html
+```
+
+## ▶️ Local setup
 
 Requirements:
 
 - Node.js **23.8.0**
 - npm
+- MySQL
 - Redis
-- Local SQL database
 - Provider credentials for live-provider tests
+
+Install dependencies:
 
 ```bash
 npm install
+```
+
+Create configuration:
+
+```bash
 cp .env.example .env
-# Edit .env
+```
+
+Edit `.env`, then build and test:
+
+```bash
 npm run build
 npm test
 ```
@@ -350,26 +197,33 @@ Recommendation tests:
 npm run test:recommendation
 ```
 
-## 🐳 Docker
+## 🧪 Tests
 
-```bash
-docker build -t stock-market-ai-agent:local .
+Tests are organized by responsibility:
+
+```text
+test/
+├── unit/
+│   ├── agents/
+│   ├── config/
+│   ├── infrastructure/
+│   ├── http/
+│   └── llm/
+└── integration/
+    ├── database/
+    └── recommendation/
 ```
 
-Pass secrets at runtime rather than baking them into the image:
+Run the complete suite:
 
 ```bash
-docker run --rm \
-  -p 3000:3000 \
-  --env-file .env \
-  stock-market-ai-agent:local
+npm test
 ```
 
-## 🧰 Testing
+Other available checks:
 
 ```bash
 npm run build
-npm test
 npm run test:recommendation
 npm run load:test
 npm run load:redis
@@ -379,30 +233,49 @@ npm run load:fairness
 npm run load:failure
 ```
 
+## 🐳 Docker
+
+```bash
+docker build -t stock-market-ai-agent:local .
+```
+
+Run with environment configuration:
+
+```bash
+docker run --rm \
+  -p 3000:3000 \
+  --env-file .env \
+  stock-market-ai-agent:local
+```
+
+Do not bake credentials into Docker images.
+
 ## 📁 Project structure
 
 ```text
 .
 ├── src/
-│   ├── agents.ts
-│   ├── agent-runtime.ts
-│   ├── recommendation.ts
-│   ├── recommendation-orchestrator.ts
-│   ├── recommendation-scoring.ts
-│   ├── tools.ts
+│   ├── modules/
+│   │   ├── agents/
+│   │   ├── recommendation/
+│   │   ├── market/
+│   │   ├── tools/
+│   │   └── llm/
+│   │       ├── accounts/
+│   │       ├── providers/
+│   │       ├── policies/
+│   │       ├── gateway/
+│   │       └── agent/
 │   ├── data-sources.ts
 │   ├── local-db-repository.ts
 │   ├── market-data.ts
-│   ├── gateway.ts
-│   ├── sdk.ts
 │   ├── http.ts
 │   ├── server.ts
-│   ├── redis.ts
-│   ├── state.ts
-│   ├── routing.ts
-│   └── providers/
-├── scripts/
+│   └── index.ts
 ├── test/
+│   ├── unit/
+│   └── integration/
+├── scripts/
 ├── docs/
 │   ├── openapi.yaml
 │   ├── swagger-ui.html
@@ -422,10 +295,10 @@ npm run load:failure
 - Never put API keys directly in source code.
 - Use credential references for provider accounts.
 - Use a secret manager in production.
-- Use shared Redis for distributed quotas.
-- Rotate exposed credentials immediately.
-- Use explicit agent tool permissions.
 - Keep provider credentials separate from the gateway API key.
+- Rotate credentials immediately if they are exposed.
+- Use explicit agent tool permissions.
+- Do not use account rotation to bypass provider restrictions.
 
 ## 📄 License
 
