@@ -1,194 +1,329 @@
-# Multi-Provider LLM Gateway
+# Stock Market AI Agent
 
-A production-oriented, provider-agnostic TypeScript gateway for routing LLM workloads across multiple providers and multiple legitimate API accounts without coupling application code to provider-specific APIs.
+A production-oriented TypeScript platform for building **multi-agent stock-market recommendations** on top of a multi-provider LLM gateway.
 
-The gateway provides a common abstraction for generation and streaming, capability-aware routing, account selection, retries and fallback, health state, rate-limit/quota controls, usage and cost accounting, observability, security boundaries, a developer SDK, an HTTP API, and atomic Redis state for multi-instance deployments.
+The system is designed around a simple principle: **market facts come from data tools and quantitative sources; LLM agents interpret the supplied evidence rather than inventing market data.**
 
-> **Status:** Production-candidate architecture. Build and CI are green, and Batch E load/Redis certification is being executed incrementally. A production deployment should still complete live-provider contract tests, container/security scanning, deployment smoke tests, and the remaining Batch E evidence checks in the target environment.
+> **Status:** Production-candidate architecture. Core gateway, multi-account routing, Redis atomic quotas, market-data routing, shared stock evidence, specialist agents, recommendation validation, Swagger/OpenAPI, and Batch-E load tooling are implemented. Full production certification still requires target-environment database integration, live-provider contract validation, E3-E6 load evidence, deployment/security validation, and the final certification record.
 
 ## Contents
 
-- [Why this gateway](#why-this-gateway)
-- [Core capabilities](#core-capabilities)
-- [Supported providers](#supported-providers)
-- [Architecture](#architecture)
-- [Request lifecycle](#request-lifecycle)
-- [Routing strategies](#routing-strategies)
-- [Capabilities and tasks](#capabilities-and-tasks)
-- [Accounts and credentials](#accounts-and-credentials)
-- [Retries, cooldowns and fallback](#retries-cooldowns-and-fallback)
-- [Rate limits and quotas](#rate-limits-and-quotas)
-- [Redis and multi-instance scaling](#redis-and-multi-instance-scaling)
-- [Usage and cost accounting](#usage-and-cost-accounting)
-- [Health and observability](#health-and-observability)
-- [Developer SDK](#developer-sdk)
-- [HTTP API](#http-api)
-- [Swagger / OpenAPI](#swagger--openapi)
-- [Environment configuration](#environment-configuration)
+- [What this project does](#what-this-project-does)
+- [Recommendation architecture](#recommendation-architecture)
+- [Shared market evidence](#shared-market-evidence)
+- [Specialist agents](#specialist-agents)
+- [Data sources](#data-sources)
+- [Local database integration](#local-database-integration)
+- [Yahoo fallback](#yahoo-fallback)
+- [Deterministic scoring](#deterministic-scoring)
+- [Multi-provider LLM gateway](#multi-provider-llm-gateway)
+- [Multiple accounts per provider](#multiple-accounts-per-provider)
+- [Redis and distributed quotas](#redis-and-distributed-quotas)
+- [HTTP API and Swagger](#http-api-and-swagger)
 - [Running locally](#running-locally)
-- [Docker](#docker)
-- [Load and production certification](#load-and-production-certification)
-- [Testing and CI](#testing-and-ci)
+- [Testing](#testing)
+- [Batch E production certification](#batch-e-production-certification)
 - [Project structure](#project-structure)
-- [Security model](#security-model)
-- [Production-readiness checklist](#production-readiness-checklist)
+- [Security](#security)
+- [Production-readiness](#production-readiness)
 
-## Why this gateway
+## What this project does
 
-Calling one LLM provider directly couples application code to that provider's authentication model, errors, limits, model names, streaming format, and availability characteristics.
-
-This project puts a stable gateway boundary between application and providers:
+The application combines structured market data, specialist agents, deterministic quantitative scoring, and an LLM decision layer to produce a validated recommendation.
 
 ```text
-Application
-    |
-    v
-Gateway SDK / HTTP API
-    |
-    +--> capability matching
-    +--> account selection
-    +--> quota / rate-limit checks
-    +--> retry / cooldown / fallback
-    +--> health state
-    +--> usage / cost accounting
-    |
-    v
-Provider Adapter
-    |
-    v
-Provider API / Model
+                         Stock / Symbol Request
+                                  |
+                                  v
+                         +-------------------+
+                         | Canonical Snapshot |
+                         +---------+---------+
+                                   |
+       +---------------------------+---------------------------+
+       |             |             |             |             |
+       v             v             v             v             v
+   Technical     Fundamental      News         Sector         Risk
+     Agent          Agent         Agent         Agent         Agent
+       |             |             |             |             |
+       +-------------+-------------+-------------+-------------+
+                                   |
+                                   v
+                       Deterministic Quant Score
+                                   |
+                                   v
+                         Recommendation Agent
+                                   |
+                                   v
+                              Critic Agent
+                                   |
+                                   v
+                         Final Decision Validator
+                                   |
+                                   v
+                           Recommendation +
+                         Evidence + Provenance
 ```
 
-Applications request a task and prompt rather than implementing provider-specific branches throughout their business logic.
+The five specialist agents are intended to execute concurrently because they are independent analyses of the same market snapshot.
 
-## Core capabilities
+## Recommendation architecture
 
-- Provider abstraction for generation, streaming, model discovery, health checks, and normalized results.
-- Multiple independently configured accounts per provider.
-- Capability-aware routing for chat, streaming, structured output, tool calling, and vision.
-- Routing strategies: `priority`, `round_robin`, `least_recently_used`, `lowest_utilization`, `fastest`, `cheapest`.
-- Bounded retries, exponential backoff, cooldowns, health transitions, and capability-aware fallback.
-- RPM, RPD, TPM, and TPD quota controls.
-- Normalized usage and estimated cost accounting.
-- Provider-neutral HTTP API with authentication, request IDs, payload limits, and normalized errors.
-- Atomic Redis state for horizontally scaled deployments.
+The recommendation pipeline separates **data acquisition**, **analysis**, and **decisioning**:
 
-## Supported providers
+1. Resolve the requested stock/symbol.
+2. Build one canonical market-data snapshot.
+3. Preserve source and freshness metadata for every dataset.
+4. Run technical, fundamental, news, sector, and risk specialists against the same evidence.
+5. Calculate deterministic quantitative scores outside the LLM.
+6. Ask the recommendation agent to synthesize the evidence and quantitative results.
+7. Run a critic/validation stage.
+8. Fail closed when the final recommendation does not satisfy the required structured contract.
+9. Return the recommendation together with evidence/provenance suitable for audit.
 
-| Provider | Adapter | Status |
-|---|---|---|
-| Google Gemini | `GeminiAdapter` | Implemented |
-| Groq | `GroqAdapter` | Implemented |
-| OpenRouter | `OpenRouterAdapter` | Implemented |
-| Cloudflare Workers AI | `CloudflareWorkersAIAdapter` | Implemented |
+This prevents each specialist from independently fetching potentially different market states and reduces duplicated data-source calls.
 
-Additional providers can be introduced through the adapter contract without changing application-level routing logic.
+## Shared market evidence
 
-## Architecture
+The canonical snapshot contains the major datasets required by the recommendation pipeline:
 
 ```text
-                         +----------------------+
-                         |      Application     |
-                         +----------+-----------+
-                                    |
-                         generate / stream
-                                    |
-                                    v
-                         +----------------------+
-                         | GatewayClient / HTTP |
-                         +----------+-----------+
-                                    |
-                                    v
-                         +----------------------+
-                         |      LLMGateway       |
-                         +----------+-----------+
-                                    |
-             +----------------------+----------------------+
-             |                      |                      |
-             v                      v                      v
-       Capability              Routing                Reliability
-       Matching                Strategy               Retry/Fallback
-             |                      |                      |
-             +----------------------+----------------------+
-                                    |
-                         +----------v-----------+
-                         | Account / Model      |
-                         | Candidate Selection  |
-                         +----------+-----------+
-                                    |
-                  +-----------------+-----------------+
-                  |                 |                 |
-                  v                 v                 v
-               Gemini             Groq          OpenRouter / CF
-                                    |
-                                    v
-                              External APIs
-
-                    Shared state when required:
-                              Redis
+quote
+history
+technicals
+fundamentals
+news
+sector strength
+risk
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for detailed architecture documentation.
+The snapshot is collected concurrently and retains data-source metadata such as:
 
-## Request lifecycle
+```text
+source
+fetchedAt
+observedAt
+freshness
+fallback
+```
 
-1. Application submits task, prompt, and options.
-2. Gateway validates the request.
-3. Capability requirements are determined.
-4. Eligible accounts/models are selected.
-5. Disabled, unhealthy, incompatible, or cooling-down candidates are excluded.
-6. Quota/rate-limit policy is evaluated.
-7. Routing strategy selects a candidate.
-8. Credential reference is resolved.
-9. Provider adapter executes the request.
-10. Provider result is normalized.
-11. Usage and cost state is recorded.
-12. Health state is updated.
-13. Response is returned.
+Specialists consume the shared evidence rather than repeatedly querying the same market-data tools.
 
-## Accounts and credentials
+### Evidence principle
 
-Example account configuration:
+LLM agents are not authoritative market-data sources. They must reason from supplied tool evidence and clearly distinguish observations from inferences.
+
+## Specialist agents
+
+| Agent | Responsibility |
+|---|---|
+| Technical | Trend, momentum, volatility, moving averages, RSI, volume, support/resistance |
+| Fundamental | Valuation, growth, profitability, leverage, cash flow |
+| News | Recent news and sentiment evidence |
+| Sector | Sector classification and relative sector strength |
+| Risk | Beta and other available risk metrics |
+
+Agent tool access is explicitly registered. An agent cannot invoke a tool that is outside its declared permission set.
+
+The runtime also supports evidence-only execution when the canonical snapshot has already been created.
+
+## Data sources
+
+The application uses a provider-neutral market-data abstraction:
+
+```text
+MarketDataSource
+    |
+    +-- quote
+    +-- history
+    +-- technicals
+    +-- fundamentals
+    +-- news
+    +-- sectorStrength
+    +-- risk
+```
+
+`DataSourceRouter` supports ordered sources and fallback based on freshness state.
+
+```text
+                 DataSourceRouter
+                       |
+              +--------+--------+
+              |                 |
+              v                 v
+          Local DB            Yahoo
+          primary           fallback
+```
+
+A source can report `fresh`, `stale`, `missing`, or `unknown`. The router can fall back when configured freshness conditions are not satisfied.
+
+## Local database integration
+
+Most market data can be supplied from a local SQL database through the `SqlMarketDataRepository` adapter.
+
+The current adapter provides repository operations for:
+
+- Quote
+- Historical OHLCV
+- Technical indicators
+- Fundamentals
+- News
+- Sector information
+- Risk metrics
+
+The current implementation expects a schema containing tables/columns represented by queries such as:
+
+```text
+stock_daily
+fundamentals
+news_articles
+```
+
+with fields for prices, OHLCV, technical indicators, fundamentals, news, sector, and risk data.
+
+**Important:** the repository adapter is schema-specific. Before production deployment, its SQL queries must be validated against the actual local database schema and exercised through integration tests. Do not assume the example schema matches an arbitrary production database.
+
+### Database boundary
+
+The application keeps SQL-specific logic behind `SqlExecutor`/`SqlMarketDataRepository`, allowing the recommendation and agent layers to remain database-independent.
+
+## Yahoo fallback
+
+Yahoo can be configured as a fallback data source when local data is unavailable or outside the configured freshness window.
+
+The intended model is:
+
+```text
+Local DB
+   |
+   +-- fresh data  ------> use it
+   |
+   +-- missing/stale ----> Yahoo fallback
+                              |
+                              v
+                         routed evidence
+```
+
+Yahoo should be treated primarily as a raw market-data fallback. Derived analytics should only be considered authoritative when the corresponding data is actually available and validated.
+
+## Deterministic scoring
+
+The recommendation pipeline includes a deterministic scoring layer so the final decision is not based solely on an LLM-generated numerical score.
+
+The scoring layer consumes structured evidence and produces quantitative components for:
+
+```text
+technical
+fundamental
+news
+sector
+risk
+overall
+```
+
+The LLM is responsible for interpreting evidence and explaining a decision; deterministic calculations provide a reproducible quantitative input.
+
+> **Production note:** the current scoring formulas are an initial deterministic layer, not a substitute for a fully validated quantitative trading model. Sector-specific calibration, backtesting, and ML integration remain required before using scores as a trading signal.
+
+## ML integration roadmap
+
+The architecture is intended to support an existing quantitative/ML model as another evidence source rather than replacing it with an LLM.
+
+Target flow:
+
+```text
+Historical DB
+     |
+     v
+Feature Engineering
+     |
+     v
+ML / XGBoost Model
+     |
+     v
+Prediction + Probability
+     |
+     v
+Canonical Evidence
+     |
+     +--------------------+
+     |                    |
+     v                    v
+Specialist Agents     Deterministic Score
+     |                    |
+     +---------+----------+
+               |
+               v
+        Final Recommendation
+```
+
+The model should be evaluated separately using historical out-of-sample data and should not be considered production-certified merely because the LLM pipeline passes its software tests.
+
+## Multi-provider LLM gateway
+
+The gateway provides a common abstraction for generation and streaming across providers.
+
+Current adapters include:
+
+| Provider | Adapter |
+|---|---|
+| Google Gemini | `GeminiAdapter` |
+| Groq | `GroqAdapter` |
+| OpenRouter | `OpenRouterAdapter` |
+| Cloudflare Workers AI | `CloudflareWorkersAIAdapter` |
+
+The gateway supports:
+
+- Capability-aware routing
+- Account selection
+- Priority and load-aware routing strategies
+- Retry/backoff
+- Cooldowns
+- Health state
+- Provider/account fallback
+- RPM/RPD/TPM/TPD controls
+- Usage/cost accounting
+- Streaming
+- Normalized errors
+- Redis-backed distributed state
+
+## Multiple accounts per provider
+
+Multiple independently configured accounts can be registered for the same provider.
+
+Example:
 
 ```ts
-const account = {
-  id: 'gemini-primary',
-  provider: 'gemini',
-  credentialRef: 'env:GEMINI_API_KEY',
-  models: ['gemini-model-id'],
-  capabilities: ['chat', 'streaming'],
-  priority: 10,
-  enabled: true,
-  limits: { rpm: 60, rpd: 10000, tpm: 100000, tpd: 1000000 },
-  costPerMillionInput: 0,
-  costPerMillionOutput: 0,
-};
+const accounts = [
+  {
+    id: 'gemini-account-1',
+    provider: 'gemini',
+    credentialRef: 'env:GEMINI_API_KEY_1',
+    models: ['gemini-model-id'],
+    capabilities: ['chat', 'streaming'],
+    priority: 10,
+    enabled: true,
+    limits: { rpm: 60, rpd: 10000, tpm: 100000, tpd: 1000000 },
+  },
+  {
+    id: 'gemini-account-2',
+    provider: 'gemini',
+    credentialRef: 'env:GEMINI_API_KEY_2',
+    models: ['gemini-model-id'],
+    capabilities: ['chat', 'streaming'],
+    priority: 10,
+    enabled: true,
+    limits: { rpm: 60, rpd: 10000, tpm: 100000, tpd: 1000000 },
+  },
+];
 ```
 
-For multiple accounts of the same provider, configure separate account IDs and credential references. The routing layer then treats them as independently eligible candidates while applying health and quota policy.
+Each account is independently eligible for routing, quota tracking, health state, and failure handling.
 
-Multiple accounts are intended for legitimate, independently authorized provider accounts and must not be used to bypass provider limits or terms.
+Multiple accounts are intended only for legitimately authorized accounts. They must not be used to circumvent provider terms, quotas, or access controls.
 
-## Retries, cooldowns and fallback
+## Redis and distributed quotas
 
-Provider failures are normalized so reliability decisions remain provider-neutral. Controls include bounded retry count, exponential backoff, `Retry-After` handling, cooldown periods, health transitions, provider/account fallback, and capability-aware candidate selection.
-
-Authentication failures are not treated as ordinary retryable failures.
-
-## Rate limits and quotas
-
-```ts
-interface AccountLimits {
-  rpm?: number;
-  rpd?: number;
-  tpm?: number;
-  tpd?: number;
-}
-```
-
-`AtomicRedisStateStore` performs quota checks and increments atomically using Redis Lua execution. Quota failures are designed to fail closed rather than silently bypass distributed limits.
-
-## Redis and multi-instance scaling
+Redis provides atomic shared state for horizontally scaled gateway instances.
 
 ```text
               Load Balancer
@@ -199,130 +334,42 @@ interface AccountLimits {
           |         |         |
           +---------+---------+
                     |
-                 Redis
+                  Redis
 ```
 
-This prevents the distributed race where several gateway instances independently check and increment the same provider quota.
+Quota reservation is performed atomically using Redis Lua execution so concurrent instances cannot independently approve reservations beyond the configured limits.
 
-Example:
-
-```ts
-const stateStore = new AtomicRedisStateStore(redisClient, 'llm-gateway');
-
-const allowed = await stateStore.reserve(
-  'gemini-primary',
-  estimatedTokens,
-  { rpm: 60, rpd: 10000, tpm: 100000, tpd: 1000000 },
-);
-```
-
-## Usage and cost accounting
-
-```ts
-interface Usage {
-  inputTokens?: number;
-  outputTokens?: number;
-  totalTokens?: number;
-  estimatedCost?: number;
-  currency?: string;
-}
-```
-
-Normalized results identify provider, account, model, request ID, latency, usage, and optional estimated cost.
-
-## Health and observability
-
-Account health states include `healthy`, `degraded`, `rate_limited`, `authentication_failure`, `temporarily_unavailable`, and `disabled`.
-
-The HTTP boundary validates or generates `X-Request-Id` and returns it with the response. Operational telemetry is normalized without exposing provider credentials.
-
-## Developer SDK
-
-### Direct client
-
-```ts
-import { GatewayClient } from 'multi-provider-llm-gateway';
-
-const client = new GatewayClient({
-  accounts,
-  adapters,
-  credentialStore,
-  usageSink,
-  strategy: 'lowest_utilization',
-  maxRetries: 2,
-  cooldownMs: 30_000,
-});
-
-const result = await client.generate({
-  task: 'coding',
-  prompt: 'Explain this function',
-  options: { maxTokens: 1000 },
-});
-```
-
-### Fluent builder
-
-```ts
-const client = gatewayClient()
-  .addAccount(account)
-  .addAdapter(adapter)
-  .credentialStore(credentialStore)
-  .usageSink(usageSink)
-  .strategy('priority')
-  .fallbackProviders(['groq', 'openrouter'])
-  .maxRetries(2)
-  .cooldownMs(30_000)
-  .build();
-```
-
-### Streaming
-
-```ts
-const stream = client.stream({ task: 'general', prompt: 'Explain Redis briefly.' });
-for await (const chunk of stream) process.stdout.write(chunk.text);
-```
-
-## HTTP API
-
-| Method | Path | Purpose | Authentication |
-|---|---|---|---|
-| `GET` | `/health` | Liveness | None |
-| `GET` | `/ready` | Readiness and healthy-account count | None |
-| `POST` | `/v1/generate` | Generate an LLM response | Optional Bearer |
-
-Example:
-
-```http
-POST /v1/generate HTTP/1.1
-Content-Type: application/json
-Authorization: Bearer <gateway-api-key>
-X-Request-Id: request-123
-
-{
-  "task": "general",
-  "prompt": "Explain event-driven architecture",
-  "options": { "maxTokens": 500 }
-}
-```
-
-The HTTP layer provides method/request validation, optional constant-time Bearer API-key comparison, request IDs, a configurable body limit (default 1 MiB), and normalized `400`, `401`, `404`, `405`, `413`, `429`, and `502` responses.
-
-## Swagger / OpenAPI
-
-The API is documented using **OpenAPI 3.0.3**.
+Supported dimensions include:
 
 ```text
-docs/
-├── openapi.yaml
-└── swagger-ui.html
+RPM  requests/minute
+RPD  requests/day
+TPM  tokens/minute
+TPD  tokens/day
 ```
 
-- [OpenAPI specification](docs/openapi.yaml)
-- [Interactive Swagger UI](docs/swagger-ui.html)
+Redis quota failures are designed to fail closed.
 
-The Swagger UI loads the OpenAPI document and supports interactive Bearer authorization. The static page is documentation tooling and is not automatically exposed as a production route.
+## HTTP API and Swagger
 
-When `src/http.ts` changes, update `docs/openapi.yaml` in the same change and update the HTTP contract tests.
+Current HTTP endpoints include:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness |
+| `GET` | `/ready` | Readiness and healthy-account count |
+| `POST` | `/v1/generate` | Generate an LLM response |
+
+OpenAPI documentation is maintained in:
+
+```text
+docs/openapi.yaml
+docs/swagger-ui.html
+```
+
+The OpenAPI document is version **3.0.3** and includes interactive Bearer authorization through the static Swagger UI.
+
+When the HTTP contract changes, update the OpenAPI document and its contract tests in the same change.
 
 ## Environment configuration
 
@@ -330,9 +377,7 @@ When `src/http.ts` changes, update `docs/openapi.yaml` in the same change and up
 cp .env.example .env
 ```
 
-Never commit real provider credentials or production `.env` files.
-
-Typical runtime configuration:
+Typical configuration:
 
 ```text
 NODE_ENV=production
@@ -342,16 +387,17 @@ REDIS_URL=redis://localhost:6379
 GATEWAY_SHUTDOWN_TIMEOUT_MS=10000
 ```
 
-Provider account credentials should be injected through the configured credential store/environment references.
+Provider credentials should be supplied through the configured credential store/environment references. Never commit real API keys or production secrets.
 
 ## Running locally
 
 ### Requirements
 
-- Node.js **23.8.0** for the current project baseline
+- Node.js **23.8.0**
 - npm
-- Redis for distributed-state/load certification
-- Provider credentials for live provider tests
+- Redis for distributed-state and load testing
+- Local SQL database containing the expected market-data schema for DB integration
+- Provider credentials for live provider contract tests
 
 Install and build:
 
@@ -360,10 +406,16 @@ npm install
 npm run build
 ```
 
-Run tests:
+Run the complete automated test suite:
 
 ```bash
 npm test
+```
+
+Run recommendation-specific tests:
+
+```bash
+npm run test:recommendation
 ```
 
 ## Docker
@@ -371,46 +423,39 @@ npm test
 The repository includes a production-oriented multi-stage Dockerfile.
 
 ```bash
-docker build -t multi-provider-llm-gateway:local .
+docker build -t stock-market-ai-agent:local .
 ```
 
-```bash
-docker run --rm \
-  -p 3000:3000 \
-  -e GATEWAY_API_KEY='replace-at-runtime' \
-  multi-provider-llm-gateway:local
-```
+Redis and the local market-data database can be supplied as external services or through the development environment.
 
-The container is designed to run as a non-root user with production dependencies. Redis can be supplied as an external service for distributed state.
+## Batch E production certification
 
-## Load and production certification
+Batch E is the load/concurrency certification track for the LLM gateway.
 
-Batch E defines the production load/concurrency certification track:
-
-| Phase | Certification | Command | Current evidence |
+| Phase | Certification | Command | Status/evidence |
 |---|---|---|---|
 | E1 | Synthetic gateway load | `npm run load:test` | ✅ Passed |
 | E2 | Redis atomic quota concurrency | `npm run load:redis` | ✅ Passed |
-| E3 | Multi-instance shared quota | `npm run load:multi` | ⏳ Execute/retain evidence |
-| E4 | Sustained load | `npm run load:sustained` | ⏳ Execute/retain evidence |
-| E5 | Account fairness | `npm run load:fairness` | ⏳ Execute/retain evidence |
-| E6 | Failure/recovery under load | `npm run load:failure` | ⏳ Execute/retain evidence |
-| E7 | Certification evidence/report | `npm run certification:batch-e` | ⏳ Evidence gate |
+| E3 | Multi-instance shared quota | `npm run load:multi` | ⏳ Evidence required |
+| E4 | Sustained load | `npm run load:sustained` | ⏳ Evidence required |
+| E5 | Account fairness | `npm run load:fairness` | ⏳ Evidence required |
+| E6 | Failure/recovery under load | `npm run load:failure` | ⏳ Evidence required |
+| E7 | Certification report/evidence gate | `npm run certification:batch-e` | ⏳ Final gate |
 
-### E1 recorded result
+### Recorded E1 result
 
 ```text
 1,000 requests
 50 concurrency
 1,000 completed
 0 failed
+1,000 provider calls
 29,212 RPS
 p95 2.91 ms
-1,000 provider calls
 1,000 state requests
 ```
 
-### E2 recorded result
+### Recorded E2 result
 
 ```text
 100 attempts
@@ -423,15 +468,16 @@ Day requests: 25
 Day tokens: 25
 ```
 
-`npm run certification:batch-e` currently prints the certification checklist and acceptance criteria. E3-E6 must be executed and their JSON output retained as release evidence before declaring Batch E fully certified.
+E3-E6 must be executed against the target environment and their JSON outputs retained as release evidence before Batch E can be declared fully certified.
 
-## Testing and CI
+## Testing
 
 Useful commands:
 
 ```bash
 npm run build
 npm test
+npm run test:recommendation
 npm run load:test
 npm run load:redis
 npm run load:multi
@@ -441,14 +487,22 @@ npm run load:failure
 npm run certification:batch-e
 ```
 
-CI gates changes on dependency installation, TypeScript compilation, tests, and the configured security/container checks. A green unit/build pipeline is necessary but not sufficient for production certification.
+The build and test suite must be green before proceeding to load certification.
 
 ## Project structure
 
 ```text
 .
 ├── src/
-│   ├── domain.ts
+│   ├── agents.ts
+│   ├── agent-runtime.ts
+│   ├── recommendation.ts
+│   ├── recommendation-orchestrator.ts
+│   ├── recommendation-scoring.ts
+│   ├── tools.ts
+│   ├── data-sources.ts
+│   ├── local-db-repository.ts
+│   ├── market-data.ts
 │   ├── gateway.ts
 │   ├── sdk.ts
 │   ├── http.ts
@@ -478,17 +532,26 @@ CI gates changes on dependency installation, TypeScript compilation, tests, and 
 └── README.md
 ```
 
-## Security model
+## Security
 
-Security controls include credential separation, normalized authentication errors, outbound access controls, redirect protection, constant-time API-key comparison, request-size limits, request-ID validation, sanitized error metadata, fail-closed Redis quotas, and non-root Docker execution.
+Security boundaries include:
+
+- Credential references instead of hard-coded provider secrets
+- Provider-neutral authentication/error handling
+- Request ID validation
+- Request-size limits
+- Constant-time gateway API-key comparison
+- Outbound access controls and redirect protection
+- Sanitized error metadata
+- Fail-closed Redis quota behavior
+- Non-root Docker execution
+- Explicit agent tool permissions
 
 Never commit API keys, access tokens, private keys, provider secrets, production `.env` files, or Redis credentials.
 
-Multiple provider accounts are intended for legitimate accounts with independently permitted usage, not for bypassing quotas or provider access controls.
+## Production-readiness
 
-## Production-readiness checklist
-
-### Application
+### Gateway
 
 - [x] Provider abstraction
 - [x] Multiple-account routing
@@ -499,24 +562,48 @@ Multiple provider accounts are intended for legitimate accounts with independent
 - [x] HTTP API
 - [x] SDK
 - [x] Redis atomic quota implementation
-- [x] Swagger/OpenAPI documentation
+- [x] Swagger/OpenAPI
 
-### Verification
+### Recommendation system
+
+- [x] Canonical market-data snapshot
+- [x] Source/freshness provenance
+- [x] Five specialist agents
+- [x] Parallel specialist execution
+- [x] Evidence-only specialist execution
+- [x] Deterministic scoring layer
+- [x] Recommendation synthesis
+- [x] Critic/final validation
+- [ ] Production-calibrated quantitative scoring
+- [ ] ML/XGBoost prediction integration
+- [ ] Historical out-of-sample validation
+
+### Data integration
+
+- [x] Local DB repository abstraction
+- [x] SQL market-data adapter
+- [x] Data-source routing
+- [x] Freshness-aware fallback
+- [ ] Validate SQL queries against the real production schema
+- [ ] Production DB integration tests
+- [ ] Live Yahoo fallback contract tests
+
+### Certification
 
 - [x] TypeScript build
-- [x] Normal test suite green
-- [x] E1 synthetic load passed
-- [x] E2 Redis atomic quota passed
-- [ ] E3 multi-instance evidence
+- [x] Automated test suite
+- [x] E1 synthetic load
+- [x] E2 Redis atomic quota
+- [ ] E3 multi-instance shared quota evidence
 - [ ] E4 sustained-load evidence
-- [ ] E5 fairness evidence
+- [ ] E5 account-fairness evidence
 - [ ] E6 failure/recovery evidence
-- [ ] E7 automated certification gate
+- [ ] E7 final certification report
 
 ### Deployment
 
 - [x] Docker build path
-- [x] CI/CD build/test path
+- [x] CI build/test path
 - [ ] Live provider contract tests
 - [ ] Container vulnerability scan
 - [ ] Production deployment smoke test
@@ -524,17 +611,12 @@ Multiple provider accounts are intended for legitimate accounts with independent
 - [ ] Monitoring and alerting configuration
 - [ ] Production secret-management integration
 
-## Design principles
+## Important production disclaimer
 
-1. **Provider neutrality** — application code should not need provider-specific branches.
-2. **Explicit eligibility** — routing cannot override health, capabilities, limits, or disabled state.
-3. **Fail closed** — quota and security failures must not silently become bypasses.
-4. **Observable without leaking secrets** — telemetry should be useful without exposing credentials.
-5. **Deterministic behavior** — routing and tests should have predictable tie-breaking.
-6. **Horizontal scalability** — shared state belongs in a distributed store when multiple instances are used.
-7. **Test the boundaries** — compiler, unit, HTTP, Redis, load, container, and deployment behavior should be validated independently.
-8. **Documentation follows the contract** — OpenAPI changes should accompany HTTP implementation changes.
+This project is a software and research platform for generating market-analysis recommendations. Passing software tests, load tests, or LLM evaluation does **not** establish that a recommendation is profitable or suitable for trading.
+
+Before using recommendations for real capital, validate the quantitative model with historical and out-of-sample testing, account for transaction costs/slippage, establish risk limits, and independently verify market-data quality and freshness.
 
 ## License
 
-See the repository license file for project licensing terms.
+Add the project's applicable license here before public distribution.
