@@ -17,7 +17,7 @@ A production-oriented TypeScript platform for building **multi-agent stock-marke
   <img src="https://img.shields.io/badge/Cloudflare%20AI-supported-F38020?style=flat-square&logo=cloudflare&logoColor=white" alt="Cloudflare AI" />
 </p>
 
-> **Status:** Production-candidate architecture. Core gateway, multi-account routing, Redis atomic quotas, market-data routing, shared stock evidence, specialist agents, recommendation validation, Swagger/OpenAPI, and Batch-E load tooling are implemented. Full production certification still requires target-environment database integration, live-provider contract validation, E3-E6 load evidence, deployment/security validation, and the final certification record.
+> **Status:** Production-candidate architecture. Core gateway, multi-account routing, Redis atomic quotas, market-data routing, shared stock evidence, specialist agents, recommendation validation, Swagger/OpenAPI, and load tooling are implemented. Full production readiness still requires target-environment database integration, live-provider contract validation, deployment/security validation, and final certification.
 
 ## 📌 What this project does
 
@@ -365,45 +365,6 @@ docker run --rm \
   stock-market-ai-agent:local
 ```
 
-## 🧪 Batch E production certification
-
-| Phase | Certification | Command | Status |
-|---|---|---|---|
-| E1 | Synthetic gateway load | `npm run load:test` | ✅ Passed |
-| E2 | Redis atomic quota concurrency | `npm run load:redis` | ✅ Passed |
-| E3 | Multi-instance shared quota | `npm run load:multi` | ⏳ Evidence required |
-| E4 | Sustained load | `npm run load:sustained` | ⏳ Evidence required |
-| E5 | Account fairness | `npm run load:fairness` | ⏳ Evidence required |
-| E6 | Failure/recovery under load | `npm run load:failure` | ⏳ Evidence required |
-| E7 | Final certification record | `npm run certification:batch-e` | ⏳ Final gate |
-
-### Recorded E1
-
-```text
-1,000 requests
-50 concurrency
-1,000 completed
-0 failed
-1,000 provider calls
-29,212 RPS
-p95 2.91 ms
-```
-
-### Recorded E2
-
-```text
-100 attempts
-RPM limit: 25
-Accepted: 25
-Rejected: 75
-Minute requests: 25
-Minute tokens: 25
-Day requests: 25
-Day tokens: 25
-```
-
-E3-E6 must be executed against the target environment and retained as release evidence before Batch E is fully certified.
-
 ## 🧰 Testing
 
 ```bash
@@ -416,7 +377,6 @@ npm run load:multi
 npm run load:sustained
 npm run load:fairness
 npm run load:failure
-npm run certification:batch-e
 ```
 
 ## 📁 Project structure
@@ -505,16 +465,6 @@ npm run certification:batch-e
 - [ ] Validate against production database schema
 - [ ] Live Yahoo contract validation
 - [ ] End-to-end DB integration tests
-
-### Certification
-
-- [x] E1 synthetic load
-- [x] E2 Redis concurrency
-- [ ] E3 multi-instance quota
-- [ ] E4 sustained load
-- [ ] E5 account fairness
-- [ ] E6 failure/recovery
-- [ ] E7 final certification record
 
 ## 📄 License
 
