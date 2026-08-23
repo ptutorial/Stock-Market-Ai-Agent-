@@ -1,1 +1,1 @@
-export { createStockTools, createStockSnapshotTool } from '../../../stock-tools.js';
+export { createStockTools, createStockSnapshotTool } from './stock.js';
