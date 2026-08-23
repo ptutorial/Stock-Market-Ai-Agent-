@@ -25,7 +25,16 @@ export class RecommendationEngine {
     const context: AgentContext = { requestId, symbol: input.symbol, exchange, horizon, input: input.data ?? {}, evidence, evidenceOnly: snapshot !== undefined };
     const specialistIds = ['technical', 'fundamental', 'news', 'sector', 'risk'];
     const agents = specialistIds.map((id) => { const agent = this.options.agents.get(id); if (!agent) throw new Error(`Required agent ${id} is not registered`); return agent; });
-    const specialistResults = await Promise.all(agents.map((agent) => this.options.runtime.run(agent, context)));
+
+    // Run each specialist to completion before starting the next specialist.
+    // AgentRuntime performs an initial LLM call followed by a tool-result call;
+    // keeping the specialist loop sequential preserves the deterministic
+    // execution order used by the recommendation pipeline and its audit trail.
+    const specialistResults: AgentResult[] = [];
+    for (const agent of agents) {
+      specialistResults.push(await this.options.runtime.run(agent, context));
+    }
+
     const conclusions = Object.fromEntries(specialistResults.map((result) => [result.role, result.output]));
     const provenance = snapshot !== undefined ? collectSnapshotProvenance(snapshot) : collectSourceProvenance(specialistResults);
     const deterministicScores = calculateDeterministicScores(snapshot !== undefined ? snapshotScoringEvidence(snapshot) : collectScoringEvidence(specialistResults));
