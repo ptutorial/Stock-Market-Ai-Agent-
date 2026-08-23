@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { loadEnvFile } from 'node:process';
 import { createClient } from 'redis';
 import { createGatewayHttpHandler, type GatewayHttpServerOptions } from './http.js';
 import { flattenAccounts, loadConfigFromEnvironment } from './config.js';
@@ -12,7 +13,17 @@ import type { StateStore } from './state.js';
 import { EnvironmentCredentialStore } from './gateway.js';
 import { HealthMonitor } from './health.js';
 
+function loadEnvironment(): void {
+  try {
+    loadEnvFile();
+  } catch (error: unknown) {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    if (code !== 'ENOENT') throw error;
+  }
+}
+
 export async function startServer(): Promise<void> {
+  loadEnvironment();
   const port = Number(process.env.PORT ?? 3000);
   const apiKey = process.env.GATEWAY_API_KEY;
   if (!apiKey) throw new Error('GATEWAY_API_KEY is required to start the HTTP server');
