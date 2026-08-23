@@ -20,6 +20,27 @@ const PROVIDERS: ProviderName[] = ['gemini', 'groq', 'openrouter', 'cloudflare']
 const CAPABILITIES: Capability[] = ['chat', 'streaming', 'structured_output', 'tool_calling', 'vision'];
 const STRATEGIES = ['priority', 'round_robin', 'least_recently_used', 'lowest_utilization', 'fastest', 'cheapest'] as const;
 
+const DEFAULT_CAPABILITIES: Record<ProviderName, Capability[]> = {
+  gemini: ['chat', 'streaming', 'structured_output', 'tool_calling', 'vision'],
+  groq: ['chat', 'streaming', 'structured_output', 'tool_calling'],
+  openrouter: ['chat', 'streaming', 'structured_output', 'tool_calling'],
+  cloudflare: ['chat', 'streaming', 'structured_output', 'tool_calling'],
+};
+
+const DEFAULT_MODELS: Record<ProviderName, string> = {
+  gemini: 'gemini-2.5-flash',
+  groq: 'llama-3.3-70b-versatile',
+  openrouter: 'openai/gpt-4o-mini',
+  cloudflare: '@cf/meta/llama-3.1-8b-instruct',
+};
+
+const ENV_PREFIXES: Record<ProviderName, string[]> = {
+  gemini: ['GEMINI_API_KEY_', 'GEMINI_ACCOUNT_'],
+  groq: ['GROQ_API_KEY_', 'GROQ_ACCOUNT_'],
+  openrouter: ['OPENROUTER_API_KEY_', 'OPENROUTER_ACCOUNT_'],
+  cloudflare: ['CLOUDFLARE_API_TOKEN_', 'CLOUDFLARE_ACCOUNT_'],
+};
+
 function isProvider(value: string): value is ProviderName {
   return PROVIDERS.includes(value as ProviderName);
 }
@@ -59,9 +80,47 @@ export function flattenAccounts(config: GatewayConfigFile): AccountConfig[] {
   return validateConfig(config).providers.filter((provider) => provider.enabled !== false).flatMap((provider) => provider.accounts.filter((account) => account.enabled !== false));
 }
 
+function discoverCredentialRefs(env: NodeJS.ProcessEnv, provider: ProviderName): string[] {
+  const matches = new Map<number, string>();
+  for (const [name, value] of Object.entries(env)) {
+    if (!value) continue;
+    for (const prefix of ENV_PREFIXES[provider]) {
+      if (!name.startsWith(prefix)) continue;
+      const suffix = name.slice(prefix.length);
+      if (!/^\d+$/.test(suffix)) continue;
+      const index = Number(suffix);
+      if (index > 0) matches.set(index, name);
+    }
+  }
+  return [...matches.entries()].sort((a, b) => a[0] - b[0]).map(([, name]) => name);
+}
+
+function dynamicConfigFromEnvironment(env: NodeJS.ProcessEnv): GatewayConfigFile {
+  const providers: ProviderConfig[] = PROVIDERS.map((provider) => {
+    const credentialRefs = discoverCredentialRefs(env, provider);
+    return {
+      name: provider,
+      enabled: credentialRefs.length > 0,
+      accounts: credentialRefs.map((credentialRef, index) => ({
+        id: `${provider}-account-${index + 1}`,
+        provider,
+        credentialRef,
+        models: [DEFAULT_MODELS[provider]],
+        capabilities: DEFAULT_CAPABILITIES[provider],
+        priority: index + 1,
+        enabled: true,
+      })),
+    };
+  }).filter((provider) => provider.accounts.length > 0);
+
+  if (providers.length === 0) throw new GatewayError('InvalidRequestError', 'No dynamic LLM provider credentials are configured');
+
+  return validateConfig({ version: 1, strategy: 'round_robin', maxRetries: 2, cooldownMs: 30_000, providers });
+}
+
 export function loadConfigFromEnvironment(env: NodeJS.ProcessEnv = process.env): GatewayConfigFile {
   const raw = env.LLM_GATEWAY_CONFIG;
-  if (!raw) throw new GatewayError('InvalidRequestError', 'LLM_GATEWAY_CONFIG is not configured');
+  if (!raw) return dynamicConfigFromEnvironment(env);
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { throw new GatewayError('InvalidRequestError', 'LLM_GATEWAY_CONFIG contains invalid JSON'); }
   return validateConfig(parsed as GatewayConfigFile);
