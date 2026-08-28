@@ -14,6 +14,11 @@ import type { RedisAtomicClient } from './redis.js';
 import type { StateStore } from './state.js';
 import { EnvironmentCredentialStore } from './gateway.js';
 import { HealthMonitor } from './health.js';
+import { YahooFinanceDataSource } from './providers/yahoo-finance.js';
+import { DataSourceRouter } from './data-sources.js';
+import { createStockTools } from './modules/tools/market/stock.js';
+import { ToolRegistry } from './modules/tools/core.js';
+import { MarketPlannerEngine } from './modules/agents/planner.js';
 
 function loadEnvironment(): void {
   const envFile = resolve(process.cwd(), '.env');
@@ -84,7 +89,37 @@ export async function startServer(): Promise<void> {
   const shutdownTimeoutMs = Number(process.env.GATEWAY_SHUTDOWN_TIMEOUT_MS ?? 10_000);
   if (!Number.isInteger(shutdownTimeoutMs) || shutdownTimeoutMs < 1_000 || shutdownTimeoutMs > 120_000) throw new Error('Invalid GATEWAY_SHUTDOWN_TIMEOUT_MS');
 
-  const gatewayOptions: GatewayHttpServerOptions = { accounts, adapters, strategy: config.strategy, maxRetries: config.maxRetries, cooldownMs: config.cooldownMs, stateStore, apiKey, maxBodyBytes };
+  // Set up market data tools and planner
+  let planner: MarketPlannerEngine | undefined;
+  try {
+    const yahoo = new YahooFinanceDataSource();
+    const dataSourceRouter = new DataSourceRouter({ sources: [yahoo] });
+    const stockTools = createStockTools(dataSourceRouter);
+    const toolRegistry = new ToolRegistry();
+    for (const tool of stockTools) toolRegistry.register(tool);
+    // Only pass accounts with real credentials to the planner (skip placeholder keys)
+    const plannerAccounts = accounts.filter((a) => {
+      const value = process.env[a.credentialRef];
+      return value && !value.startsWith('replace-with');
+    });
+    const plannerAdapters = adapters.filter((a) => plannerAccounts.some((acc) => acc.provider === a.name));
+    const { LLMGateway: PlannerLLMGateway } = await import('./gateway.js');
+    const { InMemoryStateStore: PlannerStateStore } = await import('./state.js');
+    const plannerGateway = new PlannerLLMGateway({
+      accounts: plannerAccounts,
+      adapters: plannerAdapters,
+      strategy: 'priority',
+      maxRetries: 1,
+      cooldownMs: 5_000,
+      stateStore: new PlannerStateStore(),
+    });
+    planner = new MarketPlannerEngine({ tools: toolRegistry, gateway: plannerGateway });
+    console.log('Market planner initialized with Yahoo Finance data source');
+  } catch (error) {
+    console.warn('Market planner could not be initialized:', error instanceof Error ? error.message : String(error));
+  }
+
+  const gatewayOptions: GatewayHttpServerOptions = { accounts, adapters, strategy: config.strategy, maxRetries: config.maxRetries, cooldownMs: config.cooldownMs, stateStore, apiKey, maxBodyBytes, planner };
   const handler = createGatewayHttpHandler(gatewayOptions);
   const credentialStore = new EnvironmentCredentialStore();
   const healthMonitor = new HealthMonitor();

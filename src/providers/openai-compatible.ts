@@ -89,6 +89,8 @@ export class OpenRouterAdapter extends OpenAICompatibleAdapter {
   readonly name = 'openrouter' as const;
   protected endpoint(): string { return 'https://openrouter.ai/api/v1/chat/completions'; }
   protected headers(credential: string) {
-    return { ...super.headers(credential), 'http-referer': process.env.OPENROUTER_HTTP_REFERER ?? '', 'x-title': process.env.OPENROUTER_APP_NAME ?? 'LLM Gateway' };
+    const referer = process.env.OPENROUTER_HTTP_REFERER;
+    const title = process.env.OPENROUTER_APP_NAME ?? 'LLM Gateway';
+    return { ...super.headers(credential), ...(referer ? { 'http-referer': referer } : {}), 'x-title': title };
   }
 }

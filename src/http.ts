@@ -3,10 +3,11 @@ import type { GenerateOptions, StreamChunk, TaskType } from './domain.js';
 import { GatewayError } from './errors.js';
 import { GatewayClient, type GatewayClientOptions } from './sdk.js';
 import { constantTimeEqual } from './security.js';
+import type { MarketPlannerEngine } from './modules/agents/planner.js';
 
 export interface GatewayHttpRequest { method: string; path: string; body?: unknown; headers?: Record<string, string | undefined>; }
 export interface GatewayHttpResponse { status: number; headers: Record<string, string>; body: unknown; }
-export interface GatewayHttpServerOptions extends GatewayClientOptions { maxBodyBytes?: number; apiKey?: string; corsOrigin?: string; }
+export interface GatewayHttpServerOptions extends GatewayClientOptions { maxBodyBytes?: number; apiKey?: string; corsOrigin?: string; planner?: MarketPlannerEngine; }
 
 const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
@@ -52,6 +53,13 @@ export function createGatewayHttpHandler(options: GatewayHttpServerOptions) {
         const body = request.body as { task?: TaskType; prompt?: string; options?: GenerateOptions };
         if (typeof body?.task !== 'string' || typeof body?.prompt !== 'string' || !body.prompt.trim()) return { status: 400, headers, body: { error: 'InvalidRequest', requestId } };
         const result = await client.generate({ task: body.task, prompt: body.prompt, options: body.options });
+        return { status: 200, headers, body: { ...result, requestId } };
+      }
+      if (path === '/v1/chat') {
+        const body = request.body as { prompt?: string; options?: Record<string, unknown> };
+        if (typeof body?.prompt !== 'string' || !body.prompt.trim()) return { status: 400, headers, body: { error: 'InvalidRequest', message: 'prompt is required', requestId } };
+        if (!options.planner) return { status: 503, headers, body: { error: 'ServiceUnavailable', message: 'Market planner is not configured', requestId } };
+        const result = await options.planner.chat(body.prompt, requestId);
         return { status: 200, headers, body: { ...result, requestId } };
       }
       return { status: 404, headers, body: { error: 'NotFound', requestId } };

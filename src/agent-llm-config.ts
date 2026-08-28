@@ -10,13 +10,14 @@ function buildPolicy(env: NodeJS.ProcessEnv, role: AgentRole, name: string, prim
 }
 export function loadAgentModelPolicies(env: NodeJS.ProcessEnv = process.env): Record<AgentRole, AgentModelPolicy> {
   return {
-    technical: buildPolicy(env, 'technical', 'technical-fast', 'gemini', 'GEMINI_FAST_MODEL', 'gemini-2.5-flash', 'groq', 'GROQ_FAST_MODEL', 'llama-3.3-70b-versatile', 1200),
-    fundamental: buildPolicy(env, 'fundamental', 'fundamental-reasoning', 'gemini', 'GEMINI_REASONING_MODEL', 'gemini-2.5-pro', 'openrouter', 'OPENROUTER_REASONING_MODEL', 'openai/gpt-4o', 1800),
-    news: buildPolicy(env, 'news', 'news-fast', 'gemini', 'GEMINI_FAST_MODEL', 'gemini-2.5-flash', 'groq', 'GROQ_FAST_MODEL', 'llama-3.3-70b-versatile', 1200),
-    sector: buildPolicy(env, 'sector', 'sector-fast', 'gemini', 'GEMINI_FAST_MODEL', 'gemini-2.5-flash', 'groq', 'GROQ_FAST_MODEL', 'llama-3.3-70b-versatile', 1200),
-    risk: buildPolicy(env, 'risk', 'risk-reasoning', 'gemini', 'GEMINI_REASONING_MODEL', 'gemini-2.5-pro', 'openrouter', 'OPENROUTER_REASONING_MODEL', 'openai/gpt-4o', 1800),
-    recommendation: buildPolicy(env, 'recommendation', 'recommendation-strong', 'gemini', 'GEMINI_REASONING_MODEL', 'gemini-2.5-pro', 'openrouter', 'OPENROUTER_REASONING_MODEL', 'openai/gpt-4o', 2200),
-    critic: buildPolicy(env, 'critic', 'critic-strong', 'gemini', 'GEMINI_REASONING_MODEL', 'gemini-2.5-pro', 'openrouter', 'OPENROUTER_REASONING_MODEL', 'openai/gpt-4o', 1800),
-    final_decision: buildPolicy(env, 'final_decision', 'final-strong', 'gemini', 'GEMINI_REASONING_MODEL', 'gemini-2.5-pro', 'openrouter', 'OPENROUTER_REASONING_MODEL', 'openai/gpt-4o', 1800),
+    technical: buildPolicy(env, 'technical', 'technical-fast', 'gemini', 'GEMINI_FAST_MODEL', 'gemini-flash-latest', 'groq', 'GROQ_FAST_MODEL', 'qwen/qwen3.6-27b', 1200),
+    fundamental: buildPolicy(env, 'fundamental', 'fundamental-reasoning', 'gemini', 'GEMINI_REASONING_MODEL', 'gemini-flash-latest', 'openrouter', 'OPENROUTER_REASONING_MODEL', 'openai/gpt-4o', 1800),
+    news: buildPolicy(env, 'news', 'news-fast', 'gemini', 'GEMINI_FAST_MODEL', 'gemini-flash-latest', 'groq', 'GROQ_FAST_MODEL', 'qwen/qwen3.6-27b', 1200),
+    sector: buildPolicy(env, 'sector', 'sector-fast', 'gemini', 'GEMINI_FAST_MODEL', 'gemini-flash-latest', 'groq', 'GROQ_FAST_MODEL', 'qwen/qwen3.6-27b', 1200),
+    risk: buildPolicy(env, 'risk', 'risk-reasoning', 'gemini', 'GEMINI_REASONING_MODEL', 'gemini-flash-latest', 'openrouter', 'OPENROUTER_REASONING_MODEL', 'openai/gpt-4o', 1800),
+    recommendation: buildPolicy(env, 'recommendation', 'recommendation-strong', 'gemini', 'GEMINI_REASONING_MODEL', 'gemini-flash-latest', 'openrouter', 'OPENROUTER_REASONING_MODEL', 'openai/gpt-4o', 2200),
+    critic: buildPolicy(env, 'critic', 'critic-strong', 'gemini', 'GEMINI_REASONING_MODEL', 'gemini-flash-latest', 'openrouter', 'OPENROUTER_REASONING_MODEL', 'openai/gpt-4o', 1800),
+    final_decision: buildPolicy(env, 'final_decision', 'final-strong', 'gemini', 'GEMINI_REASONING_MODEL', 'gemini-flash-latest', 'openrouter', 'OPENROUTER_REASONING_MODEL', 'openai/gpt-4o', 1800),
+    planner: buildPolicy(env, 'planner', 'planner-fast', 'gemini', 'GEMINI_FAST_MODEL', 'gemini-flash-latest', 'groq', 'GROQ_FAST_MODEL', 'qwen/qwen3.6-27b', 2000),
   };
 }

@@ -1,7 +1,7 @@
 import type { TaskType, ToolCall } from '../../domain.js';
 import type { ToolRegistry } from '../tools/registry.js';
 
-export type AgentRole = 'technical' | 'fundamental' | 'news' | 'sector' | 'risk' | 'recommendation' | 'critic' | 'final_decision';
+export type AgentRole = 'technical' | 'fundamental' | 'news' | 'sector' | 'risk' | 'recommendation' | 'critic' | 'final_decision' | 'planner';
 
 export interface AgentContext {
   requestId: string;

@@ -6,3 +6,6 @@ coverage/
 !.env.example
 npm-debug.log*
 .DS_Store
+
+# Agent skills (local config)
+.agents/

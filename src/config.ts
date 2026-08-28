@@ -29,9 +29,9 @@ const DEFAULT_CAPABILITIES: Record<ProviderName, Capability[]> = {
 
 const DEFAULT_MODELS: Record<ProviderName, string> = {
   gemini: 'gemini-flash-latest',
-  groq: 'llama-3.3-70b-versatile',
+  groq: 'qwen/qwen3.6-27b',
   openrouter: 'openai/gpt-4o-mini',
-  cloudflare: '@cf/meta/llama-3.1-8b-instruct',
+  cloudflare: '@cf/meta/llama-3.1-8b-instruct-fp8',
 };
 
 const ENV_PREFIXES: Record<ProviderName, string[]> = {
@@ -109,6 +109,7 @@ function dynamicConfigFromEnvironment(env: NodeJS.ProcessEnv): GatewayConfigFile
         capabilities: DEFAULT_CAPABILITIES[provider],
         priority: index + 1,
         enabled: true,
+        ...(provider === 'cloudflare' && env.CLOUDFLARE_ACCOUNT_ID ? { metadata: { accountId: env.CLOUDFLARE_ACCOUNT_ID } } : {}),
       })),
     };
   }).filter((provider) => provider.accounts.length > 0);

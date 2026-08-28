@@ -28,12 +28,13 @@ export class LLMGatewayAgentAdapter implements AgentLLMGateway {
 }
 
 export const DEFAULT_AGENT_MODEL_POLICIES: Record<string, AgentModelPolicy> = {
-  technical: { name: 'technical-fast', primary: { provider: 'gemini', model: 'gemini-2.5-flash' }, fallback: [{ provider: 'groq', model: 'llama-3.3-70b-versatile' }], maxOutputTokens: 1200 },
-  fundamental: { name: 'fundamental-reasoning', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
-  news: { name: 'news-fast', primary: { provider: 'gemini', model: 'gemini-2.5-flash' }, fallback: [{ provider: 'groq', model: 'llama-3.3-70b-versatile' }], maxOutputTokens: 1200 },
-  sector: { name: 'sector-fast', primary: { provider: 'gemini', model: 'gemini-2.5-flash' }, fallback: [{ provider: 'groq', model: 'llama-3.3-70b-versatile' }], maxOutputTokens: 1200 },
-  risk: { name: 'risk-reasoning', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
-  recommendation: { name: 'recommendation-strong', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 2200 },
-  critic: { name: 'critic-strong', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
-  final_decision: { name: 'final-strong', primary: { provider: 'gemini', model: 'gemini-2.5-pro' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
+  technical: { name: 'technical-fast', primary: { provider: 'gemini', model: 'gemini-flash-latest' }, fallback: [{ provider: 'groq', model: 'qwen/qwen3.6-27b' }], maxOutputTokens: 1200 },
+  fundamental: { name: 'fundamental-reasoning', primary: { provider: 'gemini', model: 'gemini-flash-latest' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
+  news: { name: 'news-fast', primary: { provider: 'gemini', model: 'gemini-flash-latest' }, fallback: [{ provider: 'groq', model: 'qwen/qwen3.6-27b' }], maxOutputTokens: 1200 },
+  sector: { name: 'sector-fast', primary: { provider: 'gemini', model: 'gemini-flash-latest' }, fallback: [{ provider: 'groq', model: 'qwen/qwen3.6-27b' }], maxOutputTokens: 1200 },
+  risk: { name: 'risk-reasoning', primary: { provider: 'gemini', model: 'gemini-flash-latest' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
+  recommendation: { name: 'recommendation-strong', primary: { provider: 'gemini', model: 'gemini-flash-latest' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 2200 },
+  critic: { name: 'critic-strong', primary: { provider: 'gemini', model: 'gemini-flash-latest' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
+  final_decision: { name: 'final-strong', primary: { provider: 'gemini', model: 'gemini-flash-latest' }, fallback: [{ provider: 'openrouter', model: 'openai/gpt-4o' }], maxOutputTokens: 1800 },
+  planner: { name: 'planner-fast', primary: { provider: 'gemini', model: 'gemini-flash-latest' }, fallback: [{ provider: 'groq', model: 'qwen/qwen3.6-27b' }], maxOutputTokens: 2000 },
 };
